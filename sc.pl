@@ -1,12 +1,12 @@
 #!/bin/perl
-# based on sc2.3.0.pl, with:
-# lessoned banana problem
+# based on sc2.3.1.pl
 use feature "say";
 use strict;
 use warnings;
 
 open RULES, "<rules.txt" or die "rules.txt not found";
 my %cats;
+my @r;
 my @map;
 my @currMap;
 my @rulesAv;
@@ -149,6 +149,15 @@ sub replace {
  #say "RPA: $ruleNo, $post, $av";
   stockCurrMap($ruleNo, $post, $av);
   
+  $av =~ /$av/;
+  my $count = my $okay = 1;
+  REF: while (1) {
+    eval "\$okay = defined \$$count";
+    eval "\$okay ? push \@r, \$$count : last REF";
+    $count++;
+  }
+  say "r:$_" for (@r);
+  
   eval "\$post =~ s/.\{$len\}/$ap/";
   $os += length ("$pre$post") - length ($word);
   @currMap = ();
@@ -156,7 +165,7 @@ sub replace {
 }
 
 sub stockCurrMap {                      #TODO: (somewhere) check that mapped cats have same length
-  say "SCM: ", @_, ":", @map;
+ #say "SCM: ", @_, ":", @map;
   my @localMap = @map;
   while (@localMap > 0 && $localMap[0] == $_[0]) {
     shift @localMap;
