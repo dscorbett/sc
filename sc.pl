@@ -1,10 +1,6 @@
 #!/bin/perl
-# based on sc2.2.pl, with:
-# array-hash-based categories
-# length-modifying sound changes
-# one mapping per line
-# backreferencing everywhere
-# usable categories other than <vowel>
+# based on sc2.3.0.pl, with:
+# lessoned banana problem
 use feature "say";
 use strict;
 use warnings;
@@ -61,6 +57,7 @@ while (<WORDS>) {
       }
       print " > $word";# if ($old ne $word);  #TODO: option to show every step or not
       @index = (0);
+      shift @map; shift @map; shift @map;
     }
   }
   say "";
@@ -117,10 +114,10 @@ sub parseCat {
   return "(" . join ("|", @fish) . ")";
 }
 
-sub regindex {
+sub regindex {say "";
   my $word = shift;
   my $regex = shift;
-  my $index = shift;
+  my $index = shift; # always 0 for now
   my @indices;
   for (my $i = $index; $i < length $word; $i++) {
     if ($word =~ /(?:^.{$i})$regex/) {
@@ -149,27 +146,30 @@ sub replace {
   my $pre = substr ($word, 0, $pos);
   my $post = substr ($word, $pos);
   
+ #say "RPA: $ruleNo, $post, $av";
   stockCurrMap($ruleNo, $post, $av);
   
-  eval "\$post =~ s/$av/$ap/";
+  eval "\$post =~ s/.\{$len\}/$ap/";
   $os += length ("$pre$post") - length ($word);
   @currMap = ();
   return ("$pre$post", $os);
 }
 
-sub stockCurrMap { # put in loop later for mult. mappings in one s.c.
-  return unless (@map > 0 && $map[0] == shift);
-  shift @map;
-  my $post = shift;
-  my $av = shift;
-  my $apCat = shift @map;
-  my $num = shift @map;
-  my $foo;
-  eval "\$foo = \$$num if (\$post =~ /$av/)";
-  say $foo;
-  my $posAv = positionAvant ($foo, $num, $av);
-  my $correspondingAp = @{$cats{$apCat}}[$posAv];
-  push @currMap, $correspondingAp;
+sub stockCurrMap {                      #TODO: (somewhere) check that mapped cats have same length
+  say "SCM: ", @_, ":", @map;
+  my @localMap = @map;
+  while (@localMap > 0 && $localMap[0] == $_[0]) {
+    shift @localMap;
+    my $post = $_[1];
+    my $av = $_[2];
+    my $apCat = shift @localMap;
+    my $num = shift @localMap;
+    my $foo;
+    eval "\$foo = \$$num if (\$post =~ /$av/)";
+    my $posAv = positionAvant ($foo, $num, $av);
+    my $correspondingAp = @{$cats{$apCat}}[$posAv];
+    push @currMap, $correspondingAp;
+  }
 }
 
 sub position {
