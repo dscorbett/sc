@@ -1,14 +1,12 @@
 #!/bin/perl
-# based on sc1.pl, with:
-# no banana problem
-# custom categories
-# backreferencing in the ante
-# word boundaries
+# based on sc2.0.pl, with:
+# simpler word boundaries
+# no backreferencing
+use feature "say";
 use strict;
 use warnings;
-use feature "say";
 
-open RULES, "<rules.txt" or die "No rules file.";
+open RULES, "<rules.txt" or die "rules.txt not found";
 my %cats;
 while (<RULES>) {
   if (/ = /) {
@@ -22,19 +20,19 @@ while (<RULES>) {
 }
 close RULES;
 
-open RULES, "<rules.txt" or die "rules.txt not found";
-my @rulesA;
-my @rulesP;
+open RULES, "<rules.txt" or die "rules.txt lost";
+my @rulesAv;
+my @rulesAp;
 while (<RULES>) {
+  chomp;
   if (/ > /) {
     my @rule = split / > /;
-    my @ante = split(/\s+/, $rule[0]);
-    my @post = split(/\s+/, $rule[1]);
-    (my $ante, my $total) = parseAnte (@ante);
-    my $post = parsePost ($total, @post);
-    
-    push @rulesA, $ante;
-    push @rulesP, $post;
+    my @avant = split (/\s+/, $rule[0]);
+    my @apres = split (/\s+/, $rule[1]);
+    (my $avant, my $total) = parseAvant (@avant);
+    my $apres = parseApres ($total, @apres);
+    push @rulesAv, $avant;
+    push @rulesAp, $apres;
   }
 }
 close RULES;
@@ -43,48 +41,62 @@ open WORDS, "<words.txt" or die "words.txt not found";
 while (<WORDS>) {
   chomp;
   print my $word = $_;
-  for (my $i = 0; $i <= $#rulesA; $i++) {
-    my $a = $rulesA[$i];
-    my $p = $rulesP[$i];
-    my $s = "\$word =~ s/$a/$p/g";
-    eval $s;
+  my @index = (0);
+  for (my $i = 0; $i <= $#rulesAv; $i++) {
+    my $av = $rulesAv[$i];
+    my $ap = $rulesAp[$i];
+    @index = regindex ($word, $av, $index[$#index]);
+    if (1) {                                   #TODO: if the program should evaluate immediately
+      eval "\$word =~ s/^(.{$_})$av/\$1$ap/" foreach (@index);
+      print " > $word";
+     @index = (0);
+    }
   }
-  say " > $word";
+  #say " > $word";
 }
 
-sub parseAnte {
-  my $ante;
+sub parseAvant {
+  my $avant;
   my $counter;
   foreach (@_) {
     $counter++;
-    if (/^<([^>]*)>$/) {
-      exists $cats{$1} ? $ante .= $cats{$1} : die "Uninitialized category: $1\n";
+    if (/^<([^>]+)>$/) {
+      exists $cats{$1} ? $avant .= $cats{$1} : die "Uninitialized category: $1\n";
     } elsif (/^\$0*(\d+)$/) {
-      $1 ne "0" && $1 < $counter ? $ante .= "(\\" . $1 . ")" : die "Invalid backreference: \$$1\n";
+      $1 ne "0" && $1 < $counter ? $avant .= "(\\$1)" : die "Invalid backreference: \$$1\n";
     } elsif (/^#$/) {
-      if ($counter == 1) {
-        $ante .= "^";
-      } else {
-        $ante .= "\$";
-      }
+      $avant .= "\\b";
     } else {
-      $ante .= "(" . $_ . ")";
+      $avant .= "($_)";
     }
   }
-  return ($ante, $counter);
+  return ($avant, $counter);
 }
 
-sub parsePost {
+sub parseApres {
   my $total = shift;
-  my $post;
+  my $apres;
   foreach (@_) {
-    if (/^<([^>]*)>$/) {
-      die "Use of category in post: $1\n";
+    if (/^<([^>]+)>$/) {
+      die "Use of category in apres: $1\n";
     } elsif (/^\$0*(\d+)$/) {
-      $1 ne "0" && $1 <= $total ? $post .= "\$" . $1 : die "Invalid backreference: \$$1\n";
+      $1 ne "0" && $1 <= $total ? $apres .= "\$" . $1 : die "Invalid backreference: \$$1\n";
     } else {
-      $post .= $_;
+      $apres .= $_;
     }
   }
-  return $post;
+  return $apres;
+}
+
+sub regindex {
+  my $word = shift;
+  my $regex = shift;
+  my $index = shift;
+  my @indices;
+  for (my $i = $index; $i < length $word; $i++) {
+    if ($word =~ /^.{$i}$regex/) {
+      push @indices, ($i);
+    }
+  }
+  return @indices;
 }
