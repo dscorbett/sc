@@ -1,18 +1,8 @@
 #!/bin/perl
-# based on sc3.1.pl, with:
-# unified parsing for avant, apres, and category defintions
-# improved category syntax
-# deletion
-# escaping of characters with regex meanings in Perl
-# limited repetitions and interrupted infinite loops
-# command-line arguments
-# directives and conditions
-# run-time word editing
-# category compliments
-# output to file
+# based on sc3.2.pl, with:
+# regex quantifiers, somewhat
 
 # TODO:
-# regex quantifiers
 # Unicode support
 # merging of redundant code
 # reorganization of code
@@ -31,7 +21,7 @@ my $rules = "rules.txt";
 my $words;
 my @words;
 my $output;
-my $limit = 100000;
+my $limit = 10000;
 my $mode = 2; # 0 = superbrief; 1 = brief; 2 = verbose
 my @clWords;
 my %cond;
@@ -181,7 +171,6 @@ foreach my $dial (split //, $dialect) {
       @index = regindex ($word, $scAvant[$i], $i);
       my $offset = 0;
       while (@index > 0) {
-#say "";
 #say "ref: ", join ",", @ref;
 #say "map: ", join ",", @map;
         ($word, $offset) = replace ($i, $word, $offset, shift @index, shift @index, $scAvant[$i], $scApres[$i]);
@@ -229,17 +218,51 @@ sub parseAvant {
   my $counter = 0;
   foreach (@_) {
     $counter++;
-    $_ =~ s/(\\|\^|\*|\?|\.|\(|\)|\}|\[|\]|\{)/\\$1/;
+    #$_ =~ s/(\\|\^|\*|\?|\.|\(|\)|\}|\[|\]|\{)/\\$1/; # useful?
     $_ =~ s/\$0*(\d+)/\\$1/;
     #$_ =~ s/\$/\\\$/;
     
+    my $min = 1;
+    my $max = 1;
+    if (/\*$/) {
+      $min = 0;
+      $max = "";
+    } elsif (/\+$/) {
+      $min = 1;
+      $max = "";
+    } elsif (/\?$/) {
+      $min = 0;
+      $max = 1;
+    } elsif (/\{(.*)\}/) {
+      if ($1 =~ /(\d+),(\d+)/) {
+        $min = $1;
+        $max = $2;
+      } elsif ($1 =~ /(\d+),/) {
+        $min = $1;
+        $max = "";
+      } elsif ($1 =~ /,(\d+)/) {
+        $min = 0;
+        $max = $1;
+      } elsif ($1 =~ /(\d+)/) {
+        $min = $1;
+        $max = $1;
+      }
+    }
+    
+    if ($max ne "" && $min > $max) {
+      my $tmp = $min;
+      $min = $max;
+      $max = $tmp;
+    }
+    
     # The extra backslashes are because of the line escaping various regex
     # characters in Perl. This should be taken care of.
-    $_ =~ s/(\\\{(.*)\}|\\\*|\\\+|\\\?)$//;
+    $_ =~ s/(\{(.*)\}|\*|\+|\?)$//;
     
     my $part;
-    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
-    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    $_ =~ s/>(?!\+|-|\|)(?=.+)/>+/; # put a + between > and any non-(+-|)
+    $_ =~ s/([^+-|])</$1+</; # put a + between any non-(+-|) and <
+    $_ =~ s/>\|</>+</g; # change | to + between categories
     $_ =~ s/#/\\b/; # word boundaries
     my @pieces = split /(?=\+|^|-)/, $_;
     
@@ -286,7 +309,9 @@ sub parseAvant {
     }
     $part =~ s/^\|//;
     $part =~ s/\|$//;
-    $avant .= "($part)";
+#   $avant .= "((?:$part){$min,$max})"; # old line
+    $avant .= "(?=(?:$part){$min,$max})"; # broken too
+say "av: ", $avant;
   }
   return ($avant, $counter);
 }
@@ -299,7 +324,7 @@ sub parseApres {
   my $fooCounter;
   foreach (@_) {
     $counter++;
-    $_ =~ s/(\\|\^|\*|\?|\.|\(|\))/\\$1/; # this is new line
+    $_ =~ s/(\\|\^|\*|\?|\.|\(|\))/\\$1/; # this is a new line
     my $suffix;
     if (/\$0*(\d+)$/) {
       $suffix = $1;
@@ -313,8 +338,9 @@ sub parseApres {
     }
     
     my $part;
-    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
-    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    $_ =~ s/>(?!\+|-|\|)(?=.+)/>+/g; # put a + between > and any non-(+-|)
+    $_ =~ s/([^+-|])</$1+</g; # put a + between any non-(+-|) and <
+    $_ =~ s/>\|</>+</g; # change | to + between categories
     my @pieces = split /(?=\+|^|-)/, $_;
     
     unless ($#pieces == -1) {
@@ -391,7 +417,7 @@ sub regindex {
   @ref = ();
   for (my $i = 0; $i < length $word; $i++) {
     die "\nQuitting due to overly long word\n" if ($i > 32766);
-    if ($word =~ /(?:^.{$i})$regex/) {
+    if ($word =~ /^(?=(?:.){$i})$regex/) {
       push @indices, ($i);
       push @indices, (length ($&) - $i);
       my $ref = 1;
@@ -400,9 +426,9 @@ sub regindex {
         my $tmp = $#tmpRef;
         eval "push \@tmpRef, \$$ref if (defined \$$ref)";
         last REF if ($#tmpRef == $tmp);
-        $ref += 2; # was $ref++;
+        $ref++;
       }
-      unshift @tmpRef, ($ref - 1) / 2;
+      unshift @tmpRef, ($ref - 1); # was [...] / 2
       push @ref, @tmpRef;
     }
   }
@@ -420,17 +446,50 @@ sub regindex {
       if ($mapCopy[0] == $scNum) {
         shift @mapCopy;
         my $string = $refCopy[shift @mapCopy];
-        my @avantCat = split ("\\|", shift @mapCopy);
+        my $avantCat = shift @mapCopy;
+        $avantCat =~ s/\)\{.*?\}$//;
+        $avantCat =~ s/^\(\?://;
+        my @avantCat = split ("\\|", $avantCat);
         my $index = -1;
+        my $quant = 0;
+        my @quant;
+#say "\nac:  ", join ",", @avantCat;
+#        foreach (0 .. $#avantCat) {
+#          last unless (defined $string);
+#          $index = $_;
+#say "str: $string";
+#say "ac_: $avantCat[$_]";
+#          last if ($avantCat[$_] eq $string);
+#        }
         foreach (0 .. $#avantCat) {
           last unless (defined $string);
-          $index = $_;
-          last if ($avantCat[$_] eq $string);
+       #   $index = $_;                                   #useless in this one??
+          while ($string =~ /($avantCat[$_]){$quant}/) {
+            $quant++;
+          }
+          $quant--; # because it increments before seeing if it should
+#say "q:   $quant ($string)";
+          if ($avantCat[$_] x $quant eq $string) {
+            push @quant, $quant;                          #somewhere 'round here-ish
+          }
         }
-        my $apString = shift @mapCopy;
+#say "qnt: ", join ",", @quant;         # @quant isn't filled up. hmm.
+        my $maxQuant = $quant[0];
+        foreach (0 .. $#quant) {
+         if ($quant[$_] > $maxQuant) {
+            $maxQuant = $quant[$_];
+            $index = $_;
+          }
+        }
+#say "max: $maxQuant";
+#say "ind: $index";
+        my $apString = shift (@mapCopy);
         # If there is no match ($index is -1) it takes the last index by default.
+        # This is a Perl-derived accident, not a feature.
         my $newString = (split "\\|", $apString)[$index];
-        push @foo, $newString;
+#say "new: $newString";
+#say "nwr: ", $newString x $quant;
+        push @foo, $newString x $quant;
         $foo[$incMatches]++;
       } else {
         shift @mapCopy;
@@ -479,8 +538,8 @@ sub addCat { # could also go in PARSING SUBROUTINES under the name parseCat
   
   foreach (@contents) {
     my $part;
-    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
-    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    $_ =~ s/>(?!\+|-)(?=.+)/>+/g; # put a + between > and any non-(+|-)
+    $_ =~ s/([^+-])</$1+</g; # put a + between any non-(+|-) and <
     $_ =~ s/#/\\b/; # word boundaries
     $_ =~ s/(\\|\$|\^|\*|\?|\.|\(|\))/\\$1/;
     my @pieces = split /(?=\+|^|-)/, $_;
@@ -589,7 +648,14 @@ sub avantCatContents {
   $avant =~ s/^\(//;
   $avant =~ s/\)$//;
   my @avant = split "\\)\\(", $avant;
-  return $avant[$suffix - 1];
+  if ($suffix == -1) {
+    $avant = $avant[0]
+  } else {
+    $avant = $avant[$suffix - 1]
+  }
+  $avant =~ s/^\(\?://;
+  $avant =~ s/\)\{.*?\}$//;
+  return $avant;
 }
 
 ######## PRESENTATION SUBROUTINES ########
