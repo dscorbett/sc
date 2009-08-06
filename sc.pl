@@ -1,31 +1,68 @@
 #!/bin/perl
-# based on sc3.0.pl, with:
-# mappings
-# "#" no longer a phoneme
-# categories in other category definitions
-# warnings instead of death
-# dialects
-# persistant sound changes
-# repetitive sound changes
-# no deletions
+# based on sc3.1.pl, with:
+# unified parsing for avant, apres, and category defintions
+# improved category syntax
+# deletion
+# escaping of characters with regex meanings in Perl
+# limited repetitions and interrupted infinite loops
+# command-line arguments
+# directives and conditions
+# run-time word editing
+# category compliments
+# output to file
 
 # TODO:
-# unified category parsing for both avant and apres
-# other category formats
-# run-time word editing
-# Geoff's modifiers
-# command-line arguments
-# Geoff's directives and conditions
+# regex quantifiers
+# Unicode support
 # merging of redundant code
 # reorganization of code
+# reorganization of escaped Perl regex characters
 # presentation
 # documentation
 
 use feature "say";
+use utf8;
 use strict;
 use warnings;
 
-######## RULES ########
+######## COMMAND-LINE ARGUMENTS ########
+
+my $rules = "rules.txt";
+my $words;
+my @words;
+my $output;
+my $limit = 100000;
+my $mode = 2; # 0 = superbrief; 1 = brief; 2 = verbose
+my @clWords;
+my %cond;
+my $edit = 0;
+
+foreach (@ARGV) {
+  (/^-(?:r|rules)=(.+)$/i) ? $rules = $1 :
+  (/^-(?:w|words)=(.+)$/) ? $words = $1 :
+  (/^-(?:o|output)=(.+)$/i) ? $output = $1 :
+  (/^-(?:l|limit)=(\d+)$/i) ? $limit = $1 :
+  (/^-(?:m|mode)=(\d+)$/i) ? $mode = $1 :
+  (/^-(?:c|cond)=(.+)$/i) ? $cond{uc $1} = "" :
+  (/^-(?:e|edit)$/i) ? $edit = 1 :
+  push @clWords, $_;
+}
+
+if (defined $output) {
+  open OUTPUT, ">", $output or warn "$output not found\n"; # :encoding(utf8)
+  $output = *OUTPUT;
+}
+
+$words = "words.txt" unless (defined $words || $#clWords > -1);
+if (defined $words) {
+  open WORDS, "<", $words or die "$words not found\n"; # :encoding(utf8)
+  chomp(@words = <WORDS>);
+  close WORDS;
+}
+push @words, @clWords;
+
+
+######## VARIABLES ########
 
 my %cats;
 my @ref;
@@ -38,14 +75,43 @@ my $dialect = "";
 my @scLects;
 my @scPersist;
 my @scRepeat;
+my @scPersistRepeat;
+my $skip = 0; # 0 = noskip; 1 = skip; 2 = end
 
-open RULES, "<rules.txt" or die "rules.txt not found\n";
+######## RULES ########
+
+open RULES, "<", $rules or die "$rules not found\n"; # :encoding(utf8)
 RULE: while (<RULES>) {
+  next if ($skip == 2);
   next if (/^\s*($|!)/); # comment or blank line
   chomp;
   ($_) = split /!/, $_;
   $_ = trim ($_);
   
+  my $skipping = 0;
+  if (/^(SKIP|NOSKIP|END)\b/i) {
+    if (/^SKIP\b/i) {
+      if (/^SKIP\s+(IF|UNLESS)\s+(.+)/i) {
+        next RULE if ($1 eq uc "IF" && !exists $cond{uc $2});
+        next RULE if ($1 eq uc "UNLESS" && exists $cond{uc $2});
+      }
+      $skip = 1;
+    } elsif (/^NOSKIP\b/i) {
+      if (/^NOSKIP\s+(IF|UNLESS)\s+(.+)/i) {
+        next RULE if ($1 eq uc "IF" && !exists $cond{uc $2});
+        next RULE if ($1 eq uc "UNLESS" && exists $cond{uc $2});
+      }
+      $skip = 0;
+    } elsif (/^END\b/i) {
+      if (/^END\s+(IF|UNLESS)\s+(.+)/i) {
+        next RULE if ($1 eq uc "IF" && !exists $cond{uc $2});
+        next RULE if ($1 eq uc "UNLESS" && exists $cond{uc $2});
+      }
+      $skip = 2;
+    }
+    $skipping = 1;
+  }
+  next if ($skip);
   if (/^\[(.*)\]$/) {
     $dialect .= $1;
   } elsif (/ > /) {
@@ -57,12 +123,16 @@ RULE: while (<RULES>) {
         shift @avant;
       }
       
-      my @apres = split (/\s+/, $rule[1]) if defined $rule[1];
+      my @apres = (""); # so it won't complain if there is no apres (i.e. a deletion)
+      @apres = split (/\s+/, $rule[1]) if defined $rule[1];
       if ($apres[-1] =~ /\[(.*)\]/) {
-        if ($1 =~ /P/i) {
+        my $flags = $1;
+        if ($flags =~ /P/i) {
           push @scPersist, $scNum;
-        }
-        if ($1 =~ /R/i) {
+          if ($flags =~ /R/i) {
+            push @scPersistRepeat, $scNum;
+          }
+        } elsif ($flags =~ /R/i) {
           push @scRepeat, $scNum;
         }
         pop @apres;
@@ -70,7 +140,7 @@ RULE: while (<RULES>) {
       
       (my $avant, my $total) = parseAvant (@avant);
       next RULE if ($total == -1);
-      push (@scAvant, $avant);
+      push @scAvant, $avant;
       
       (my $apres, my $check) = parseApres ($total, $scNum, @apres);
       unless ($check == 1) {
@@ -87,10 +157,9 @@ RULE: while (<RULES>) {
     (my $cat, my $contents) = split /=/, $_, 2;
     $cat = trim ($cat);
     $contents = trim ($contents);
-#   my $tmp = # Why was this temperary variable necessary?
     addCat ($cat, $contents);
   } else {
-    warn "Unparsable statement \"$_\" ignored\n";
+    warn "Unparsable statement \"$_\" ignored\n" unless ($skipping);
   }
   warn "Ambiguous statement \"$_\" parsed as sound change\n" if (/=/ && / > /);
 }
@@ -100,31 +169,37 @@ close RULES;
 
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
-  say "$dial:" if (length $dialect > 1);
-  open WORDS, "<words.txt" or die "words.txt not found\n";
-  while (<WORDS>) {
+  record ("$dial:\n") if (length $dialect > 1);
+  foreach (@words) {
     chomp;
-    print my $word = $_;
+    record (my $word = $_);
     my @index;
     SC: for (my $i = 0; $i <= $#scAvant; $i++) {
+      my $old = $word;
       next SC unless ($dialect eq " " || !defined ($scLects[$i]) || $scLects[$i] =~ /$dial/);
       next SC if (join (",", @scPersist) =~ /$i/);
-      @index = regindex ($word, $scAvant[$i], 0, $i);
+      @index = regindex ($word, $scAvant[$i], $i);
       my $offset = 0;
       while (@index > 0) {
+#say "";
+#say "ref: ", join ",", @ref;
+#say "map: ", join ",", @map;
         ($word, $offset) = replace ($i, $word, $offset, shift @index, shift @index, $scAvant[$i], $scApres[$i]);
         my $refShift = shift @ref;
         shift @ref foreach (1 .. $refShift);
         my $fooShift = shift @foo;
         shift @foo foreach (1 .. $fooShift);
       }
-      print " > $word";
+      $word = edit (" > ", $word) if ($mode >= 2);
+      $limit--;
+      die "\nQuitting due to possible infinite repetition\n" if ($limit == 0);
       
-      print " [" if ($#scPersist > -1);
+      record (" [") if ($#scPersist > -1 && $mode >= 2);
       PSC: for (my $j = 0; $j <= $#scAvant; $j++) {
+        my $oldP = $word;
         next PSC unless ($dialect eq " " || !defined ($scLects[$j]) || $scLects[$j] =~ /$dial/);
         next PSC unless (join (",", @scPersist) =~ /$j/);
-        @index = regindex ($word, $scAvant[$j], 0, $j);
+        @index = regindex ($word, $scAvant[$j], $j);
         my $offset = 0;
         while (@index > 0) {
           ($word, $offset) = replace ($j, $word, $offset, shift @index, shift @index, $scAvant[$j], $scApres[$j]);
@@ -133,43 +208,85 @@ foreach my $dial (split //, $dialect) {
           my $fooShift = shift @foo;
           shift @foo foreach (1 .. $fooShift);
         }
-        print " > $word";
+        $word = edit (" > ", $word) if ($mode >= 2);
+        $limit--;
+        die "\nQuitting due to possible infinite repetition\n" if ($limit == 0);
+        $j-- if (join (",", @scPersistRepeat) =~ /$j/ && $word =~ /$scAvant[$j]/ && $word ne $oldP);
       }
-      print "]" if ($#scPersist > -1);
-      
-      $i-- if (join (",", @scRepeat) =~ /$i/ && $word =~ /$scAvant[$i]/);
+      record ("]") if ($#scPersist > -1 && $mode >= 2);
+      $word = edit (" > ", $word) if ($mode == 1);
+      $i-- if (join (",", @scRepeat) =~ /$i/ && $word =~ /$scAvant[$i]/ && $word ne $old);
     }
-    say "";
+    $word = edit (" > ", $word) if ($mode <= 0);
+    record ("\n");
   }
 }
 
-######## PRIMARY SUBROUTINES ########
+######## PARSING SUBROUTINES ########
 
 sub parseAvant {
   my $avant;
   my $counter = 0;
   foreach (@_) {
     $counter++;
-    if (/^<([^>]+)>$/) {
-      if (exists $cats{$1}) {
-        $avant .= catContents ($1);
+    $_ =~ s/(\\|\^|\*|\?|\.|\(|\)|\}|\[|\]|\{)/\\$1/;
+    $_ =~ s/\$0*(\d+)/\\$1/;
+    #$_ =~ s/\$/\\\$/;
+    
+    # The extra backslashes are because of the line escaping various regex
+    # characters in Perl. This should be taken care of.
+    $_ =~ s/(\\\{(.*)\}|\\\*|\\\+|\\\?)$//;
+    
+    my $part;
+    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
+    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    $_ =~ s/#/\\b/; # word boundaries
+    my @pieces = split /(?=\+|^|-)/, $_;
+    
+    foreach my $piece (@pieces) {
+      next if ($piece =~ /^-/);
+      $piece =~ s/\+//;
+      if ($piece =~ /^<(.*)>$/) {
+        my $contents = catContents ($1);
+        return ("", -1) if ($contents eq "");
+        $part .= "|" . $contents;
       } else {
-        warn "Uninitialized category: <$1>\n";
-        return ("", -1);
+        $part .= "|" . $piece;
       }
-    } elsif (/^\$0*(\d+)$/) {
-      if ($1 ne "0" && $1 < $counter) {
-        $avant .= "(\\$1)";
-      } else {
-        warn "Invalid backreference: \$$1\n";
-        return ("", -1);
-      }
-    } elsif (/^#$/) {
-      $avant .= "\\b";
-      $counter--; # because "#" is not a phoneme
-    } else {
-      $avant .= "($_)";
     }
+    my @minus;
+    foreach my $piece (@pieces) {
+      next unless ($piece =~ /^-/);
+      $piece =~ s/-//;
+      my @mPieces = split /\|/, $piece;
+      foreach my $mPiece (@mPieces) {
+        if ($mPiece =~ /^<(.*)>$/) {
+          my $contents = catContents ($1);
+          return ("", -1) if ($contents eq "");
+          push @minus, split /\|/, $contents;
+        } else {
+          push @minus, $mPiece;
+        }
+      }
+    }
+    if (defined $part) {
+      foreach my $del (@minus) {
+        $part =~ s/\|$del//g;
+      }
+    } else {
+      $part = "?!";
+      foreach my $del (@minus) {
+        $part .= $del . "|";
+      }
+      $part =~ s/\|$//;
+    }
+    if (!defined $part || $part eq "") {
+      warn "Useless empty string in the first half of rule ", $scNum + 1, "\n";
+      return ("", -1);
+    }
+    $part =~ s/^\|//;
+    $part =~ s/\|$//;
+    $avant .= "($part)";
   }
   return ($avant, $counter);
 }
@@ -177,55 +294,103 @@ sub parseAvant {
 sub parseApres {
   my $total = shift;
   my $scNum = shift;
-  my $apres;
+  my $apres = "";
   my $counter;
-  my $mapCounter;
+  my $fooCounter;
   foreach (@_) {
     $counter++;
-    if (/^<([^>]+)>/) {
-      unless (exists $cats{$1}) {
-        warn "Uninitialized category: <$1>\n";
-        return ("", 0);
-      }
-      unless (/^<($1)>\$0*(\d+)$/) {
-        warn "Unspecified backreference for category <$1>\n";
-        return ("", 0);
-      }
-      if ($2 eq "0" || $2 > $total) {
-        warn "Invalid backreference for category <$1>: \$$2\n";
-        return ("", 0);
-      }
-      #die "Backreference to a literal: <$1>\n" unless avantType ($scNum, $2); # No reason for death here
-      unless (catLength ($1) == avantCatLength ($scNum, $2)) {
-        warn "Category length mismatch: <$1>\$$2\n";
-        return ("", 0);
-      }
-      
-      $mapCounter++;
-      $apres .= "\$foo[$mapCounter]"; # was "\$foo[$counter]"
-      push @map, $scNum, $2, avantCatContents ($scNum, $2), $1;
-    } elsif (/^\$0*(\d+)$/) {
-      if ($1 ne "0" && $1 <= $total) {
-        $apres .= "\$ref[$1]";
-      } else {
-        warn "Invalid backreference: \$$1\n";
-        return ("", 0);
-      }
+    $_ =~ s/(\\|\^|\*|\?|\.|\(|\))/\\$1/; # this is new line
+    my $suffix;
+    if (/\$0*(\d+)$/) {
+      $suffix = $1;
     } else {
-      $apres .= $_;
+      $suffix = -1;
+    }
+    $_ =~ s/\$0*(\d+)$//;
+    if ($suffix eq "0" || $suffix > $total) {
+      warn "Invalid backreference for $_: \$$suffix\n";
+      return ("", 0);
+    }
+    
+    my $part;
+    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
+    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    my @pieces = split /(?=\+|^|-)/, $_;
+    
+    unless ($#pieces == -1) {
+      foreach my $piece (@pieces) {
+        next if ($piece =~ /^-/);
+        $piece =~ s/\+//;
+        if ($piece =~ /^<(.*)>$/) {
+          my $contents = catContents ($1);
+          return ("", 0) if ($contents eq "");
+          $part .= "|" . $contents;
+        } else {
+          $part .= "|" . $piece;
+        }
+      }
+      my @minus;
+      foreach my $piece (@pieces) {
+        next unless ($piece =~ /-/);
+        $piece =~ s/^-//;
+        my @mPieces = split /\|/, $piece;
+        foreach my $mPiece (@mPieces) {
+          if ($mPiece =~ /^<(.*)>$/) {
+            my $contents = catContents ($1);
+            return ("", 0) if ($contents eq "");
+            push @minus, split /\|/, $contents;
+          } else {
+            push @minus, $mPiece;
+          }
+        }
+      }
+      foreach my $del (@minus) {
+        $part =~ s/\|$del//g;
+      }
+      if (!defined $part || $part eq "") {
+        warn "Useless empty string in the second half of rule ", $scNum + 1, "\n";
+        return ("", 0);
+      }
+      $part =~ s/^\|//;
+    } else {
+      $part = avantCatContents ($scNum, $suffix);
+    }
+    
+    # In the following, defined $part is for when there is a deletion (i.e. no apres)
+    if (defined $part && $suffix == -1 && ($part =~ tr/\|//) != 0) {
+      warn "Unspecified backreference for <$part>\n";
+      return ("", 0);
+    }
+    unless ($suffix ne "0" && $suffix <= $total) {
+      warn "Invalid backreference: \$$suffix\n";
+      return ("", 0);
+    }
+    if (defined $part && ($part =~ tr/\|//) != avantCatLength ($scNum, $suffix)) {
+      my $x = ($part =~ tr/\|//);
+      warn "Category length mismatch: <$part>\$$suffix (" . (avantCatLength ($scNum, $suffix) + 1) . " != " . ($x + 1) . ")\n";
+      return ("", 0);
+    }
+    unless ($suffix == -1) {
+      $fooCounter++;
+      $apres .= "\$foo[$fooCounter]";
+      push @map, $scNum, $suffix, avantCatContents ($scNum, $suffix), $part;
+    } elsif (defined $part) {
+      $apres .= $part;
     }
   }
   return ($apres, 1);
 }
 
+######## SOUND-CHANGING SUBROUTINES ########
+
 sub regindex {
   my $word = shift;
   my $regex = shift;
-  my $index = shift; # always 0 for now
   my $scNum = shift;
   my @indices;
   @ref = ();
-  for (my $i = $index; $i < length $word; $i++) {
+  for (my $i = 0; $i < length $word; $i++) {
+    die "\nQuitting due to overly long word\n" if ($i > 32766);
     if ($word =~ /(?:^.{$i})$regex/) {
       push @indices, ($i);
       push @indices, (length ($&) - $i);
@@ -235,9 +400,9 @@ sub regindex {
         my $tmp = $#tmpRef;
         eval "push \@tmpRef, \$$ref if (defined \$$ref)";
         last REF if ($#tmpRef == $tmp);
-        $ref++;
+        $ref += 2; # was $ref++;
       }
-      unshift @tmpRef, ($ref - 1);
+      unshift @tmpRef, ($ref - 1) / 2;
       push @ref, @tmpRef;
     }
   }
@@ -245,7 +410,6 @@ sub regindex {
   my @mapCopy;
   my @refCopy;
   @refCopy = @ref;
-  
   @foo = ();
   while (@refCopy > 0) {
     push @foo, 0;
@@ -257,13 +421,15 @@ sub regindex {
         shift @mapCopy;
         my $string = $refCopy[shift @mapCopy];
         my @avantCat = split ("\\|", shift @mapCopy);
-        my $index;
+        my $index = -1;
         foreach (0 .. $#avantCat) {
+          last unless (defined $string);
           $index = $_;
           last if ($avantCat[$_] eq $string);
         }
-        my $catName = shift @mapCopy;
-        my $newString = ${$cats{$catName}}[$index];
+        my $apString = shift @mapCopy;
+        # If there is no match ($index is -1) it takes the last index by default.
+        my $newString = (split "\\|", $apString)[$index];
         push @foo, $newString;
         $foo[$incMatches]++;
       } else {
@@ -276,6 +442,7 @@ sub regindex {
     defined $refCopy[0] ? my $refShift = shift @refCopy : last;
     shift @refCopy foreach (1 .. $refShift);
   }
+#say "\nfoo: ", join ",", @foo;
   return @indices;
 }
 
@@ -290,6 +457,8 @@ sub replace {
   my $pre = substr ($word, 0, $pos);
   my $post = substr ($word, $pos);
   
+  die "Overly long word\n" if ($len > 32766);
+  
   # The double nature of the following is to circumvent its complaint of an uninitialized $apres.
   defined $apres ? eval "\$post =~ s/.\{$len\}/$apres/" : eval "\$post =~ s/.\{$len\}//"; 
   $os += length ("$pre$post") - length ($word);
@@ -298,34 +467,60 @@ sub replace {
 
 ######## CATEGORY SUBROUTINES ########
 
-sub addCat {
+sub addCat { # could also go in PARSING SUBROUTINES under the name parseCat
   my $cat = shift;
+  if($cat =~ /(\s|\+|-)/) {
+    warn "Illegal character in <$cat>'s name: \"$1\"";
+    return;
+  }
   my $contents = shift;
-  if ($cat =~ /(\s|,|\||\+|-)/) {
-    warn "Illegal character \"$1\" in category name: <$cat>\n";
-    return;
-  }
-  if ($contents =~ /([(|)])/) {
-    warn "Illegal character in <$cat>: \"$1\"\n";
-    return;
-  }
-  if ($contents =~ /^$/) {
-    warn "Empty category: <$cat>\n";
-    return;
-  }
-  #die "Unit category: <$cat>\n" if ($contents !~ /\s/); # No reason for death here
-  
-  my $tmp = [];
   my @contents = split /\s+/, $contents;
+  my $tmp = [];
+  
   foreach (@contents) {
-    if (/^<([^>]+)>$/) {
-      my @subcat = catArray ($1);
-      push @$tmp, $_ foreach (@subcat);
-    } elsif (/^#$/) {
-      push @$tmp, "\\b";
-    } else {
-      push @$tmp, $_;
+    my $part;
+    $_ =~ s/>(?!\+|-)(?=.+)/>+/; # put a + between > and any non-(+|-)
+    $_ =~ s/([^+-])</$1+</; # put a + between any non-(+|-) and <
+    $_ =~ s/#/\\b/; # word boundaries
+    $_ =~ s/(\\|\$|\^|\*|\?|\.|\(|\))/\\$1/;
+    my @pieces = split /(?=\+|^|-)/, $_;
+    
+    foreach my $piece (@pieces) {
+      next if ($piece =~ /^-/);
+      $piece =~ s/\+//;
+      if ($piece =~ /^<(.*)>$/) {
+        my $contents = catContents ($1);
+        return if ($contents eq "");
+        $part .= "|" . $contents;
+      } else {
+        $part .= "|" . $piece;
+      }
     }
+    my @minus;
+    foreach my $piece (@pieces) {
+      next unless ($piece =~ /-/);
+      $piece =~ s/^-//;
+      my @mPieces = split /\|/, $piece;
+      foreach my $mPiece (@mPieces) {
+        if ($mPiece =~ /^<(.*)>$/) {
+          my $contents = catContents ($1);
+          return ("", -1) if ($contents eq "");
+          push @minus, split /\|/, $contents;
+        } else {
+          push @minus, $mPiece;
+        }
+      }
+    }
+    foreach my $del (@minus) {
+      $part =~ s/\|$del//g;
+    }
+    if (!defined $part || $part eq "") {
+      warn "Useless empty category <$cat>\n";
+      return;
+    }
+    
+    $part =~ s/^\|//;
+    push @$tmp, split /\|/, $part;
   }
   $cats{$cat} = $tmp;
 }
@@ -352,48 +547,82 @@ sub catLength {
 sub catContents {
   my $name = shift;
   my @fish;
+  unless (exists $cats{$name}) {
+    warn "Uninitialized category: <$name>\n";
+    return ("");
+  }
   foreach (0 .. $#{$cats{$name}}) {
     push @fish, @{$cats{$name}}[$_];
   }
-  return "(" . join ("|", @fish) . ")";
+  return join ("|", @fish);
 }
 
 sub avantType { # 0 is literal, 1 is cat
   my $scNum = shift;
-  my $num = shift;
+  my $suffix = shift;
   my $avant = $scAvant[$scNum];
   $avant =~ s/^\(//;
   $avant =~ s/\)$//;
   my @avant = split "\\)\\(", $avant;
-  $avant[$num - 1] =~ /\|/ ? return 1 : return 0;
+  $avant[$suffix - 1] =~ /\|/ ? return 1 : return 0;
 }
 
-sub avantCatLength { # when it is already known that $scAvant[$scNum]'s $num-th piece is a cat
+sub avantCatLength {
   my $scNum = shift;
-  my $num = shift;
+  my $suffix = shift;
   my $avant = $scAvant[$scNum];
   $avant =~ s/^\(//;
   $avant =~ s/\)$//;
   my @avant = split "\\)\\(", $avant;
-  my @avantPart = split "\\|", $avant[$num - 1];
-  return $#avantPart;
+  unless ($suffix == -1) {
+    my @avantPart = split "\\|", $avant[$suffix - 1];
+    return $#avantPart;
+  }
+  # This is for strings without suffixes, i.e literals. It is 0 for 1 is added above.
+  return 0;
 }
 
-sub avantCatContents { # as above
+sub avantCatContents {
   my $scNum = shift;
-  my $num = shift;
+  my $suffix = shift;
   my $avant = $scAvant[$scNum];
   $avant =~ s/^\(//;
   $avant =~ s/\)$//;
   my @avant = split "\\)\\(", $avant;
-  return $avant[$num - 1];
+  return $avant[$suffix - 1];
 }
 
-######## OTHER SUBROUTINES ########
+######## PRESENTATION SUBROUTINES ########
 
 sub trim {
   my $string = shift;
   $string =~ s/^\s+//;
   $string =~ s/\s+$//;
+  $string =~ s/>$/> /; # hack to make deletions possible
   return $string;
+}
+
+sub edit {
+  record (shift);
+  my $text = shift;
+  record ($text);
+  if ($edit) {
+    record (" >>");
+    my $input = <STDIN>;
+    if (defined $input) {
+      chomp $input;
+      print $output $input if (defined $output);
+    } else {
+      $edit = 0;
+      return ($text);
+    }
+    $input eq "" ? return $text : return $input;
+  }
+  return $text;
+}
+
+sub record {
+  my $str = shift;
+  print $str;
+  print $output $str if (defined $output);
 }
