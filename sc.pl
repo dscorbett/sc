@@ -1,8 +1,11 @@
 #!/bin/perl
-# based on sc3.2.pl, with:
-# regex quantifiers, somewhat
+# based on sc3.2.pl and sc3.3.pl, with:
+# regex quantifiers
+# word boundaries
 
 # TODO:
+# quantifiers: backreferencing to one only returns the last matched, not the whole string
+# retest editing
 # Unicode support
 # merging of redundant code
 # reorganization of code
@@ -61,6 +64,8 @@ my @foo;
 my $scNum = 0;
 my @scAvant;
 my @scApres;
+my @min;
+my @max;
 my $dialect = "";
 my @scLects;
 my @scPersist;
@@ -155,14 +160,20 @@ RULE: while (<RULES>) {
 }
 close RULES;
 
+say "av.: ", join ",", @scAvant;
+
 ######## WORDS ########
+
+#say "min: ", join ",", @min;
+#say "max: ", join ",", @max;
 
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
   record ("$dial:\n") if (length $dialect > 1);
   foreach (@words) {
     chomp;
-    record (my $word = $_);
+    my $word = " $_ ";
+    record (trim ($word));
     my @index;
     SC: for (my $i = 0; $i <= $#scAvant; $i++) {
       my $old = $word;
@@ -179,7 +190,7 @@ foreach my $dial (split //, $dialect) {
         my $fooShift = shift @foo;
         shift @foo foreach (1 .. $fooShift);
       }
-      $word = edit (" > ", $word) if ($mode >= 2);
+      $word = edit (" >", $word) if ($mode >= 2);
       $limit--;
       die "\nQuitting due to possible infinite repetition\n" if ($limit == 0);
       
@@ -216,6 +227,8 @@ foreach my $dial (split //, $dialect) {
 sub parseAvant {
   my $avant;
   my $counter = 0;
+  my @tmpMin;
+  my @tmpMax;
   foreach (@_) {
     $counter++;
     #$_ =~ s/(\\|\^|\*|\?|\.|\(|\)|\}|\[|\]|\{)/\\$1/; # useful?
@@ -248,22 +261,22 @@ sub parseAvant {
         $max = $1;
       }
     }
-    
     if ($max ne "" && $min > $max) {
       my $tmp = $min;
       $min = $max;
       $max = $tmp;
     }
+    push @tmpMin, $min;
+    push @tmpMax, $max;
     
-    # The extra backslashes are because of the line escaping various regex
-    # characters in Perl. This should be taken care of.
     $_ =~ s/(\{(.*)\}|\*|\+|\?)$//;
     
     my $part;
     $_ =~ s/>(?!\+|-|\|)(?=.+)/>+/; # put a + between > and any non-(+-|)
     $_ =~ s/([^+-|])</$1+</; # put a + between any non-(+-|) and <
     $_ =~ s/>\|</>+</g; # change | to + between categories
-    $_ =~ s/#/\\b/; # word boundaries
+    $_ =~ s/#/ /; # word boundaries
+    
     my @pieces = split /(?=\+|^|-)/, $_;
     
     foreach my $piece (@pieces) {
@@ -309,10 +322,12 @@ sub parseAvant {
     }
     $part =~ s/^\|//;
     $part =~ s/\|$//;
-#   $avant .= "((?:$part){$min,$max})"; # old line
-    $avant .= "(?=(?:$part){$min,$max})"; # broken too
-say "av: ", $avant;
+    $avant .= "($part)";
   }
+  unshift @tmpMin, $#_ + 1;
+  unshift @tmpMax, $#_ + 1;
+  push @min, @tmpMin;
+  push @max, @tmpMax;
   return ($avant, $counter);
 }
 
@@ -322,6 +337,7 @@ sub parseApres {
   my $apres = "";
   my $counter;
   my $fooCounter;
+  return ("", 1) if ($_[0] eq ""); # special case for deletions
   foreach (@_) {
     $counter++;
     $_ =~ s/(\\|\^|\*|\?|\.|\(|\))/\\$1/; # this is a new line
@@ -413,30 +429,49 @@ sub regindex {
   my $word = shift;
   my $regex = shift;
   my $scNum = shift;
+  $regex = quant ($regex, $scNum);
   my @indices;
   @ref = ();
+  my @qRef = ();
+#say "";
   for (my $i = 0; $i < length $word; $i++) {
     die "\nQuitting due to overly long word\n" if ($i > 32766);
-    if ($word =~ /^(?=(?:.){$i})$regex/) {
+#say "$word =~ /(?:^.{$i})$regex/";
+    if ($word =~ /(?:^.{$i})$regex/) {
       push @indices, ($i);
       push @indices, (length ($&) - $i);
-      my $ref = 1;
+      my $ref = 2;
       my @tmpRef = ();
       REF: while (1) {
         my $tmp = $#tmpRef;
         eval "push \@tmpRef, \$$ref if (defined \$$ref)";
         last REF if ($#tmpRef == $tmp);
-        $ref++;
+        $ref += 2;
       }
-      unshift @tmpRef, ($ref - 1); # was [...] / 2
+      unshift @tmpRef, ($ref - 2) / 2;
       push @ref, @tmpRef;
+      
+      $ref = 1;
+      my @tmpQRef = ();
+      QREF: while (1) {
+        my $tmp = $#tmpQRef;
+        eval "push \@tmpQRef, \$$ref if (defined \$$ref)";
+        last QREF if ($#tmpQRef == $tmp);
+        $ref += 2;
+      }
+      unshift @tmpQRef, ($ref - 1) / 2;
+      push @qRef, @tmpQRef;
     }
   }
   
+
+say "qRef:", join ",", @qRef;
+
   my @mapCopy;
   my @refCopy;
   @refCopy = @ref;
   @foo = ();
+#say "refC: ", join ",", @refCopy;
   while (@refCopy > 0) {
     push @foo, 0;
     my $incMatches;
@@ -445,52 +480,32 @@ sub regindex {
     while (@mapCopy > 0) {
       if ($mapCopy[0] == $scNum) {
         shift @mapCopy;
-        my $string = $refCopy[shift @mapCopy];
-        my $avantCat = shift @mapCopy;
-        $avantCat =~ s/\)\{.*?\}$//;
-        $avantCat =~ s/^\(\?://;
-        my @avantCat = split ("\\|", $avantCat);
+        my $refIndex = shift @mapCopy;
+#say ":$refIndex:$refCopy[$refIndex]:";
+        my $string = $refCopy[$refIndex];
+        my $qString = $qRef[$refIndex];
+        
+        my $matches = 0;
+        unless ($string eq "") {
+          $matches++ while ($qString =~ /($string){$matches}/);
+          $matches--;
+        }
+#say "\nmch: $matches ($string in $qString)";
+        
+        my @avantCat = split ("\\|", shift @mapCopy); 
         my $index = -1;
-        my $quant = 0;
-        my @quant;
-#say "\nac:  ", join ",", @avantCat;
-#        foreach (0 .. $#avantCat) {
-#          last unless (defined $string);
-#          $index = $_;
-#say "str: $string";
-#say "ac_: $avantCat[$_]";
-#          last if ($avantCat[$_] eq $string);
-#        }
         foreach (0 .. $#avantCat) {
           last unless (defined $string);
-       #   $index = $_;                                   #useless in this one??
-          while ($string =~ /($avantCat[$_]){$quant}/) {
-            $quant++;
-          }
-          $quant--; # because it increments before seeing if it should
-#say "q:   $quant ($string)";
-          if ($avantCat[$_] x $quant eq $string) {
-            push @quant, $quant;                          #somewhere 'round here-ish
-          }
+          $index = $_;
+          last if ($avantCat[$_] eq $string);
         }
-#say "qnt: ", join ",", @quant;         # @quant isn't filled up. hmm.
-        my $maxQuant = $quant[0];
-        foreach (0 .. $#quant) {
-         if ($quant[$_] > $maxQuant) {
-            $maxQuant = $quant[$_];
-            $index = $_;
-          }
-        }
-#say "max: $maxQuant";
-#say "ind: $index";
-        my $apString = shift (@mapCopy);
+        my $apString = shift @mapCopy;
         # If there is no match ($index is -1) it takes the last index by default.
-        # This is a Perl-derived accident, not a feature.
         my $newString = (split "\\|", $apString)[$index];
-#say "new: $newString";
-#say "nwr: ", $newString x $quant;
-        push @foo, $newString x $quant;
-        $foo[$incMatches]++;
+        unless ($newString =~ / /) {
+          push @foo, $newString;
+          $foo[$incMatches]++;
+        }
       } else {
         shift @mapCopy;
         shift @mapCopy;
@@ -499,10 +514,73 @@ sub regindex {
       }
     }
     defined $refCopy[0] ? my $refShift = shift @refCopy : last;
-    shift @refCopy foreach (1 .. $refShift);
+    shift @qRef;
+    foreach (1 .. $refShift) {
+      shift @refCopy;
+      shift @qRef;
+    }
   }
-#say "\nfoo: ", join ",", @foo;
+say "ref: ", join ",", @ref;
+#say "qRef:", join ",", @qRef;
+say "map: ", join ",", @map;
+say "foo: ", join ",", @foo;
   return @indices;
+}
+
+sub quant {
+  my $regex = shift;
+  my $scNum = shift;
+  my @regex = $regex =~ /\((.*?)\)/g;
+  
+  my @minCopy = @min;
+  my @maxCopy = @max;
+  my @realMin;
+  my @realMax;
+  my $loops = 0;
+#  foreach (@minCopy) {
+#    if ($scNum == $loops) {
+#      my $next = shift @minCopy;
+#      shift @maxCopy;
+#      @realMin = @minCopy[0 .. $next - 1];
+#      @realMax = @maxCopy[0 .. $next - 1];
+#      last;
+#    } else {
+#      shift @maxCopy;
+#      foreach (1 .. shift @minCopy) {
+#        shift @minCopy;
+#        shift @maxCopy;
+#      }
+#    }
+#    $loops++;
+#  }
+  while ($scNum != $loops) {
+    $loops++;
+    my $qShift = shift @minCopy;
+    shift @maxCopy; # to match @minCopy
+    foreach (1 .. $qShift) {
+      shift @minCopy;
+      shift @maxCopy;
+    }
+  }
+  my $qShift = $minCopy[0];
+  foreach (1 .. $qShift) {
+    push @realMin, $minCopy[$_];
+    push @realMax, $maxCopy[$_];
+  }
+say "\n[", join (",", @minCopy), "][", join (",", @maxCopy), "]";
+say "[", join (",", @min), "][", join (",", @max), "]";
+say "[", join (",", @realMin), "][", join (",", @realMax), "]";
+  my $return;
+  foreach (0 .. $#regex) {
+    if ($regex[$_] =~ /\\b/) {
+      $return .= "$regex[$_]";
+    } elsif (defined ($realMax[$_])) {
+      $return .= "(($regex[$_]){$realMin[$_],$realMax[$_]})";
+    } else {
+      $return .= "(($regex[$_]){$realMin[$_],})"; # sth screws up realM__ up w/ >2 rules
+    }
+  }
+  return $return;
 }
 
 sub replace {
@@ -538,9 +616,10 @@ sub addCat { # could also go in PARSING SUBROUTINES under the name parseCat
   
   foreach (@contents) {
     my $part;
-    $_ =~ s/>(?!\+|-)(?=.+)/>+/g; # put a + between > and any non-(+|-)
-    $_ =~ s/([^+-])</$1+</g; # put a + between any non-(+|-) and <
-    $_ =~ s/#/\\b/; # word boundaries
+    $_ =~ s/>(?!\+|-|\|)(?=.+)/>+/g; # put a + between > and any non-(+-|)
+    $_ =~ s/([^+-|])</$1+</g; # put a + between any non-(+-|) and <
+    $_ =~ s/>\|</>+</g; # change | to + between categories
+    $_ =~ s/#/ /; # word boundaries
     $_ =~ s/(\\|\$|\^|\*|\?|\.|\(|\))/\\$1/;
     my @pieces = split /(?=\+|^|-)/, $_;
     
