@@ -1,4 +1,5 @@
 #!/bin/perl
+# A sound change applier, like Geoff Eddy's SCA and Zompist's Sounds
 # based on 3.4.pl, with:
 # quantifiers
 # recognition of digraphs as single units
@@ -10,15 +11,20 @@
 # consolidated condition input
 # optional limits
 # editing set per word, not per set of all words
+# conditions in rules file
+# escaped Perl regex characters, except . (by design) and + (by necessity)
+# default output file
+# arbitrary-depth file inclusion
+# printable comments for non-persistant rules
+# backreferences in nonascending order (i.e. $2 $1 $3)
 
 # TODO:
-# comment levels
+# backreferences to backreferences
+# escaped slashes
 # Unicode support
 # merging of redundant code
-# reorganization of code
-# reorganization of escaped Perl regex characters
 # presentation
-# documentation
+# documentation proofreading
 
 use feature "say";
 use strict;
@@ -31,19 +37,30 @@ my $words;
 my @words;
 my $output;
 my $limit = my $maxLimit = 1000; 
-my $mode = 3; # 0 = results only; 1 = superbrief; 2 = brief; 3 = verbose
+my $mode = 3; # 0 = final; 1 = original and final; 2 = after each non-persistant rule; 3 = after each rule
 my @clWords;
 my %cond;
 my $edit = 0;
+my $colonThreshold = 0;
+my $notAll = 0;
+my $reqDial = "";
+my $fields = ",";
+my $separator = ",";
 
 foreach (@ARGV) {
-  (/^-(?:r|rules)=(.+)$/i) ? $rules = $1 :
-  (/^-(?:w|words)=(.+)$/) ? $words = $1 :
-  (/^-(?:o|output)=(.+)$/i) ? $output = $1 :
+  (/^-(?:c|cond)=(.+)$/i) ? parseCond (uc $1) :
+  (/^-(?:d|dialects)=(.+)$/i) ? $reqDial = $1 :
+  (/^-(?:e|edit)$/i) ? $edit = 1 :
+  (/^-(?:f|fields)=(.+)$/i) ? parseFields ($1) :
+  (/^-(?:h|hlevel)=(\d+)$/i) ? $colonThreshold = $1 :
   (/^-(?:l|limit)=(\d+)$/i) ? $limit = $maxLimit = $1 :
   (/^-(?:m|mode)=(\d+)$/i) ? $mode = $1 :
-  (/^-(?:c|cond)=(.+)$/i) ? parseCond (uc $1) :
-  (/^-(?:e|edit)$/i) ? $edit = 1 :
+  (/^-(?:n|notall)$/i) ? $notAll = 1 :
+  (/^-(?:o|output)$/i) ? $output = "output.txt" :
+  (/^-(?:o|output)=(.+)$/i) ? $output = $1 :
+  (/^-(?:r|rules)=(.+)$/i) ? $rules = $1 :
+  (/^-(?:s|separator)=(.+)$/i) ? $separator = $1 :
+  (/^-(?:w|words)=(.+)$/) ? $words = $1 :
   push @clWords, $_;
 }
 
@@ -62,7 +79,20 @@ if (defined $words) {
   chomp(@words = <WORDS>);
   close WORDS;
 }
-push @words, @clWords;
+
+unless ($fields eq ",") {
+  my @newWords = ();
+  foreach my $w (0 .. $#words) {
+    my @line = split $separator, $words[$w];
+    foreach (0 .. $#line) {
+      my $plusOne = $_ + 1;
+      push @newWords, $line[$_] if ($fields =~ ",$plusOne,");
+    }
+  }
+  @words = @newWords if ($#newWords + 1);
+}
+
+unshift @words, @clWords;
 
 ######## VARIABLES ########
 
@@ -70,6 +100,7 @@ my %cats;
 my @tentAvant;
 my @scAvant;
 my @scApres;
+my @tentAbsMap;
 my @absMap;
 my @map;
 my $scNum = 0;
@@ -79,100 +110,126 @@ my @scPersist;
 my @scRepeat;
 my @scPersistRepeat;
 my $skip = 0; # 0 = noskip; 1 = skip
+my @colon;
 
 ######## RULES ########
 
-open RULES, "<$rules" or die "$rules not found\n";
-RULE: while (<RULES>) {
-  # SET-UP
-  next if (/^\s*($|!)/); # comment or blank line
-  chomp;
-  ($_) = split /!/, $_;
-  $_ = trim ($_);
-  
-  # SKIPPING AND ENDING
-  my $skipping = 0;
-  if (/^(SKIP|NOSKIP|END)\b/i) {
-    if (/^SKIP\b/i) {
-      if (/^SKIP\s+(IF|UNLESS)\s+(.+)/i) {
-        next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
-        next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
-      }
-      $skip = 1;
-    } elsif (/^NOSKIP\b/i) {
-      if (/^NOSKIP\s+(IF|UNLESS)\s+(.+)/i) {
-        next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
-        next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
-      }
-      $skip = 0;
-    } elsif (/^END\b/i) {
-      if (/^END\s+(IF|UNLESS)\s+(.+)/i) {
-        next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
-        next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
-      }
-      last RULE;
-    }
-    $skipping = 1;
-  }
-  next if ($skip);
-  
-  if (/^\[(.*)\]$/) {
-    $dialect .= $1;
-  } elsif (/ > /) {
-    my @rule = split / > /;
-    @tentAvant = ();
-    
-    if (defined $rule[0]) {
-      my @avant = split (/\s+/, $rule[0]);
-      if ($avant[0] =~ /\[(.*)\]/) {
-        push @scLects, $1;
-        shift @avant;
-      }
-      
-      my @tmpAvant = parseAvant (@avant);
-      next RULE if ($#tmpAvant == -1);
-      push @tentAvant, $scNum, @tmpAvant;
-      
-      my @apres = (""); # so it won't complain if there is no apres (i.e. a deletion)
-      @apres = split (/\s+/, $rule[1]) if defined $rule[1];
-      if ($apres[-1] =~ /\[(.*)\]/) {
-        my $flags = $1;
-        if ($flags =~ /P/i) {
-          push @scPersist, $scNum;
-          if ($flags =~ /R/i) {
-            push @scPersistRepeat, $scNum;
-          }
-        } elsif ($flags =~ /R/i) {
-          push @scRepeat, $scNum;
-        }
-        pop @apres;
-      }
-      
-      my @tentAvantPart = tentAvantCat ($scNum);
-      my @tmpApres = parseApres (($#tentAvantPart + 1) / 2, $scNum, @apres);
-      next RULE if ($#tmpApres == -1);
-      
-      push @scAvant, @tentAvant;
-      push @scApres, $scNum, @tmpApres;
-      
-      $scNum++;
-    } else {
-      warn "Rule ", $scNum + 1, " has no original form\n";
-    }
-  } elsif (/=/) {
-    (my $cat, my $contents) = split /=/, $_, 2;
-    $cat = trim ($cat);
-    $contents = trim ($contents);
-    parseCat ($cat, $contents);
-  } else {
-    warn "Unparsable statement \"$_\" ignored\n" unless ($skipping);
-  }
-  warn "Ambiguous statement \"$_\" parsed as a sound change\n" if (/=/ && / > /);
-}
-close RULES;
+my $lvl = -1;
+rules ($rules, $lvl);
 
+sub rules {
+  my $rules = shift;
+  my $lvl = 1 + shift;
+  eval "open RULES$lvl, \"<\$rules\" or die";
+  die "$rules not found ($lvl level(s) deep)\n" if (defined $@ && $@ ne "");
+  my $rulesRef;
+  eval "\$rulesRef = \\\*RULES$lvl";
+  RULE: while (<$rulesRef>) {
+    # SET-UP
+    next if (/^\s*($|!)/); # comment or blank line
+    chomp;
+    ($_) = split /!/, $_;
+    $_ = trim ($_);
+    
+    # SKIPPING AND ENDING
+    my $skipping = 0;
+    if (/^(SKIP|NOSKIP|END)\b/i) {
+      if (/^SKIP\b/i) {
+        if (/^SKIP\s+(IF|UNLESS)\s+(.+)/i) {
+          next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
+          next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
+        }
+        $skip = 1;
+      } elsif (/^NOSKIP\b/i) {
+        if (/^NOSKIP\s+(IF|UNLESS)\s+(.+)/i) {
+          next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
+          next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
+        }
+        $skip = 0;
+      } elsif (/^END\b/i) {
+        if (/^END\s+(IF|UNLESS)\s+(.+)/i) {
+          next RULE if (uc $1 eq "IF" && !exists $cond{uc $2});
+          next RULE if (uc $1 eq "UNLESS" && exists $cond{uc $2});
+        }
+        last RULE;
+      }
+      $skipping = 1;
+    }
+    next if ($skip);
+    
+    if (/^DIAL(ECTS)?\s+(\S*)$/i) {
+      $dialect .= $2;
+    } elsif (/^COND(ITIONS)?\s+(.*)/i) {
+      parseCond (uc $2);
+    } elsif (/ > /) {
+      my @rule = split / > /;
+      @tentAvant = ();
+      my @tentLects = ();
+      
+      if (defined $rule[0]) {
+        my @avant = split (/\s+/, $rule[0]);
+        unless (defined $avant[0]) {
+          warn "Rule ", $scNum + 1, " has no original form\n";
+        } else {
+          if ($avant[0] =~ /\[(.*)\]/) {
+            push @tentLects, $1;
+            shift @avant;
+          } else {
+            push @tentLects, "";
+          }
+          
+          my @tmpAvant = parseAvant (@avant);
+          next RULE if ($#tmpAvant == -1);
+          push @tentAvant, $scNum, @tmpAvant;
+          
+          my @apres = (""); # so it won't complain if there is no apres (i.e. a deletion)
+          @apres = split (/\s+/, $rule[1]) if defined $rule[1];
+          if ($apres[-1] =~ /\[(.*)\]/) {
+            my $flags = $1;
+            if ($flags =~ /P/i) {
+              push @scPersist, $scNum;
+              if ($flags =~ /R/i) {
+                push @scPersistRepeat, $scNum;
+              }
+            } elsif ($flags =~ /R/i) {
+              push @scRepeat, $scNum;
+            }
+            pop @apres;
+          }
+          
+          my @tentAvantPart = tentAvantCat ($scNum);
+          my @tmpApres = parseApres (($#tentAvantPart + 1) / 2, $scNum, @apres);
+          next RULE if ($#tmpApres == -1);
+          
+          push @scAvant, @tentAvant;
+          push @scApres, $scNum, @tmpApres;
+          push @scLects, @tentLects;
+          push @absMap, @tentAbsMap;
+          
+          $scNum++;
+        }
+      }
+    } elsif (/=/) {
+      (my $cat, my $contents) = split /=/, $_, 2;
+      $cat = trim ($cat);
+      $contents = trim ($contents);
+      parseCat ($cat, $contents);
+    } elsif (/^INCLUDE\s+(.+?)(\.txt|)$/i) {
+      $2 ne "" ? rules ($1 . $2, $lvl) : rules ($1 . ".txt", $lvl);
+    } elsif (/^#(:*)(\s*)(.*)$/) {
+      push @colon, $scNum, length $1, $3;
+    } else {
+      warn "Unparsable statement \"$_\" ignored\n" unless ($skipping);
+    }
+    warn "Ambiguous statement \"$_\" parsed as a sound change\n" if (defined $_ && /=/ && / > /);
+  }
+  close $rulesRef;
+}
+
+#say "::: ", join ",", @colon;
 #say "av: ", join ",", @scAvant;
 #say "ap: ", join ",", @scApres;
+#say "abs: ", join ",", @absMap;
 #foreach my $name (keys %cats) {
 #  print "$name: ";
 #  foreach (0 .. $#{$cats{$name}}) {
@@ -183,22 +240,35 @@ close RULES;
 #say "p:  ", join ",", @scPersist;
 #say "r:  ", join ",", @scRepeat;
 #say "pr: ", join ",", @scPersistRepeat;
+#say "req: [$reqDial]";
+#say "dlc: [$dialect]";
+#say "scl: ", join ",", @scLects;
 
 ######## WORDS ########
 
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
+  next unless ($reqDial eq "" || $reqDial =~ $dial);
   record ("$dial:\n") if (length $dialect > 1);
+  my @colonCopy = @colon;
   foreach (@words) {
     $limit = $maxLimit;
     $edit = 1 if ($edit == -1);
     chomp;
-    my $word = $_;
+    my $original = my $word = $_;
     record ($word) unless ($mode == 0);
     my @index;
     SC: for (my $i = 0; $i < $scNum; $i++) {
+      if ($#colonCopy + 1 && $colonCopy[0] == $i) {
+        shift @colonCopy;
+        if ($colonCopy[0] <= $colonThreshold) {
+          record ("\n" . $colonCopy[1] . "\n") if ($mode >= 2);
+        }
+        shift @colonCopy;
+        shift @colonCopy;
+      }
       my $old = $word;
-      next SC unless ($dialect eq " " || !defined ($scLects[$i]) || $scLects[$i] =~ /$dial/);
+      next SC unless ($dialect eq " " || $scLects[$i] eq "" || $scLects[$i] =~ /$dial/);
       next SC if (join (",", @scPersist) =~ /$i/);
       @index = regindex ($word, $i);
       my $offset = 0;
@@ -209,16 +279,16 @@ foreach my $dial (split //, $dialect) {
         my $mapShift = shift @map;
         shift @map foreach (1 .. $mapShift);
       }
-      $word = edit (" > ", $word) if ($mode >= 3);
+      $word = edit (" > ", $word) if ($mode >= 3 && ($notAll == 0 || $word ne $old));
       $limit--;
       die "\nQuitting due to possible infinite repetition\n" if ($limit == 0);
       
       record (" [") if ($#scPersist > -1 && $mode >= 3);
-      PSC: for (my $j = 0; $j < $scNum; $j++) { # $j < $#scAvant
+      PSC: for (my $j = 0; $j < $scNum; $j++) {
         my $oldP = $word;
         next PSC unless ($dialect eq " " || !defined ($scLects[$j]) || $scLects[$j] =~ /$dial/);
         next PSC unless (join (",", @scPersist) =~ /$j/);
-        @index = regindex ($word, $j); # ($word, $scAvant[$j], $j)
+        @index = regindex ($word, $j);
         my $offset = 0;
         while (@index > 0) {
           my $avant = join "", avantCat ($j);
@@ -227,17 +297,17 @@ foreach my $dial (split //, $dialect) {
           my $mapShift = shift @map;
           shift @map foreach (1 .. $mapShift);
         }
-        $word = edit (" > ", $word) if ($mode >= 3);
+        $word = edit (" > ", $word) if ($mode >= 3 && ($notAll == 0 || $word ne $old));
         $limit--;
         die "\nQuitting due to possible infinite repetition\n" if ($limit == 0);
         $j-- if (join (",", @scPersistRepeat) =~ /$j/ && $word ne $oldP);
       }
       record ("]") if ($#scPersist > -1 && $mode >= 3);
       
-      $word = edit (" > ", $word) if ($mode == 2);
+      $word = edit (" > ", $word) if ($mode == 2 && ($notAll == 0 || $word ne $old));
       $i-- if (join (",", @scRepeat) =~ /$i/ && $word ne $old);
     }
-    $word = edit (" > ", $word) if ($mode == 1);
+    $word = edit (" > ", $word) if ($mode == 1 && ($notAll == 0 || $word ne $original));
     record ($word) if ($mode == 0);
     record ("\n");
   }
@@ -248,26 +318,26 @@ foreach my $dial (split //, $dialect) {
 sub parseAvant {
   my @ret;
   foreach (@_) {
-     # COMPLEMENTS
-     my $complement = "";
-     my $complement2 = "";
-     $complement = "(?!" if (/^\^/);
-     $complement2 = ")." if (/^\^/);
-     $_ =~ s/^\^//;
+    # COMPLEMENTS
+    my $complement = "";
+    my $complement2 = "";
+    $complement = "(?!" if (/^\^/);
+    $complement2 = ")." if (/^\^/);
+    $_ =~ s/^\^//;
     
     # QUANTIFIERS AND GREED
     my $min = 1;
     my $max = 1;
     my $greed = "";
-    if (/\*(\?|)$/) {
+    if (/(?:(?!\\).)\*(\?|)$/) {
       $min = 0;
       $max = "";
       $greed = "?" if ($1 eq "?");
-    } elsif (/\+(\?|)$/) {
+    } elsif (/(?:(?!\\).)\+(\?|)$/) {
       $min = 1;
       $max = "";
       $greed = "?" if ($1 eq "?");
-    } elsif (/\{(.*)\}(\?|)$/) {
+    } elsif (/(?:(?!\\).)\{(.*)\}(\?|)$/) {
       $greed = "?" if ($2 eq "?");
       if ($1 =~ /(\d+),(\d+)/) {
         $min = $1;
@@ -282,7 +352,7 @@ sub parseAvant {
         $min = $1;
         $max = $1;
       }
-    } elsif (/\?(\?|)$/) {
+    } elsif (/(?:(?!\\).)\?(\?|)$/) {
       $min = 0;
       $max = 1;
       $greed = "?" if ($1 eq "?");
@@ -292,7 +362,8 @@ sub parseAvant {
       $min = $max;
       $max = $tmp;
     }
-    $_ =~ s/(\{(.*)\}|\*|\+|\?)(\?|)$//;
+    $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
+    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?)/\\$1/;
     
     # THE MAIN PART OF THE REGEX
     my $part;
@@ -305,13 +376,27 @@ sub parseAvant {
     
     foreach my $piece (@pieces) {
       next if ($piece =~ /^-/);
-      $piece =~ s/\+//;
-      if ($piece =~ /^<(.*)>$/) {
+      $piece =~ s/^\+//; # was everywhere
+      if ($piece =~ /^<(.*)>$/) {#say "380cc";
         my $contents = catContents ($1);
         return ("", -1) if ($contents eq "");
         $part .= "|" . $contents;
       } else {
-        $part .= "|" . $piece;
+        if ($piece =~ /^\$0*(\d+)$/) {
+          if ($1 <= ($#ret + 1) / 2) {
+            unless ($1 == 0) {
+              $part .= "|\\$1";
+           } else {
+              warn "\$0 refers to nothing\n";
+              return;
+            }
+          } else {
+            ($#ret + 1) / 2 == 0 ? warn "Backreferences are not allowed there: nothing to refer to\n" : warn "Backreference \$$1 has too great a value; it should be no more than \$", ($#ret + 1) / 2, "\n";
+            return;
+          }
+        } else {
+          $part .= "|" . $piece;
+        }
       }
     }
     my @minus;
@@ -320,7 +405,7 @@ sub parseAvant {
       $piece =~ s/-//;
       my @mPieces = split /\|/, $piece;
       foreach my $mPiece (@mPieces) {
-        if ($mPiece =~ /^<(.*)>$/) {
+        if ($mPiece =~ /^<(.*)>$/) {#say "410cc";
           my $contents = catContents ($1);
           return if ($contents eq "");
           push @minus, split /\|/, $contents;
@@ -339,18 +424,22 @@ sub parseAvant {
     $part =~ s/^\|//;
     $part =~ s/\|$//;
     
+    $part =~ s/\|/\)\(\?\!/g unless ($complement eq ""); # | -> )(?! if complementing
+    
     push @ret, "($complement$part$complement2)", "{$min,$max}$greed";
   }
   return @ret;
 }
 
 sub parseApres {
+  @tentAbsMap = ();
   my $total = shift;
   my $scNum = shift;
   my @ret;
   my $counter;
   my $mapCounter;
-  return "" if ($_[0] eq ""); # TODO: special case for deletions
+  return () if ($_[0] eq "");
+  
   foreach (@_) {
     $counter++;
     
@@ -364,7 +453,7 @@ sub parseApres {
     $_ =~ s/\$0*(\d+)$//;
     if ($suffix eq "0" || $suffix > $total) {
       warn "Invalid backreference \$$suffix for <$_> in rule ", $scNum + 1, "\n";
-      return;
+      return ();
     }
     
     # THE MAIN PART OF THE REGEX
@@ -379,9 +468,9 @@ sub parseApres {
       foreach my $piece (@pieces) {
         next if ($piece =~ /^-/);
         $piece =~ s/\+//;
-        if ($piece =~ /^<(.*)>$/) {
+        if ($piece =~ /^<(.*)>$/) {#say "471cc";
           my $contents = catContents ($1);
-          return if ($contents eq "");
+          return () if ($contents eq "");
           $part .= "|" . $contents;
         } else {
           $part .= "|" . $piece;
@@ -393,9 +482,9 @@ sub parseApres {
         $piece =~ s/^-//;
         my @mPieces = split /\|/, $piece;
         foreach my $mPiece (@mPieces) {
-          if ($mPiece =~ /^<(.*)>$/) {
+          if ($mPiece =~ /^<(.*)>$/) {#say "485cc";
             my $contents = catContents ($1);
-            return ("", 0) if ($contents eq "");
+            return () if ($contents eq "");
             push @minus, split /\|/, $contents;
           } else {
             push @minus, $mPiece;
@@ -407,7 +496,7 @@ sub parseApres {
       }
       if (!defined $part || $part eq "") {
         warn "Useless empty string in the second half of rule ", $scNum + 1, "\n";
-        return;
+        return ();
       }
       $part =~ s/^\|//;
     } else {
@@ -417,21 +506,17 @@ sub parseApres {
     # In the following, defined $part is for when there is a deletion (i.e. no apres)
     if (defined $part && $suffix == -1 && ($part =~ tr/\|//) != 0) {
       warn "Unspecified backreference for <$part> in rule ", $scNum + 1, "\n";
-      return;
+      return ();
     }
-    #if ($suffix eq "0" || $suffix > $total) {
-    #  warn "Invalid backreference: \$$suffix in rule ", $scNum + 1, "\n";
-    #  return;
-    #}
     if (defined $part && ($part =~ tr/\|//) != avantCatLength ($scNum, $suffix)) {
       my $x = ($part =~ tr/\|//);
       warn "Category length mismatch with <$part>\$$suffix (" . (avantCatLength ($scNum, $suffix) + 1) . " != ", $x + 1 . ") in rule ", $scNum + 1, "\n";
-      return;
+      return ();
     }
     unless ($suffix == -1) {
       $mapCounter++;
       push @ret, "\$map[$mapCounter]";
-      push @absMap, $scNum, $suffix, avantCatContents ($scNum, $suffix), $part; # explanation of @absMap
+      push @tentAbsMap, $scNum, $suffix, avantCatContents ($scNum, $suffix), $part; # explanation of @absMap
     } elsif (defined $part) {
       push @ret, $part;
     }
@@ -457,13 +542,12 @@ sub parseCat {
     $_ =~ s/>\|</>+</g; # change | to + between categories
     $_ =~ s/#/\\b/g; # change # to \b
     
-   # $_ =~ s/(\\|\$|\^|\*|\?|\.|\(|\))/\\$1/;
     my @pieces = split /(?=\+|^|-)/, $_;
     
     foreach my $piece (@pieces) {
       next if ($piece =~ /^-/);
       $piece =~ s/\+//;
-      if ($piece =~ /^<(.*)>$/) {
+      if ($piece =~ /^<(.*)>$/) {#say "550cc";
         my $contents = catContents ($1);
         return if ($contents eq "");
         $part .= "|" . $contents;
@@ -477,7 +561,7 @@ sub parseCat {
       $piece =~ s/^-//;
       my @mPieces = split /\|/, $piece;
       foreach my $mPiece (@mPieces) {
-        if ($mPiece =~ /^<(.*)>$/) {
+        if ($mPiece =~ /^<(.*)>$/) {#say "564cc";
           my $contents = catContents ($1);
           return ("", -1) if ($contents eq "");
           push @minus, split /\|/, $contents;
@@ -504,12 +588,34 @@ sub parseCond {
   $cond{$_} = "" foreach (split ",", shift);
 }
 
+sub parseFields {
+  my @bits = split ",", shift;
+  my $ret = "";
+  foreach (@bits) {
+    my @pieces = split "-";
+    foreach (@pieces) {
+      unless (/^\d+$/) {
+        warn "Non-digits in numeric range in -fields\n";
+        return;
+      }
+    }
+    if ($#pieces != 0 && $pieces[0] >= $pieces[-1]) {
+      warn "Minimum not less than maximum in -fields range\n";
+      return;
+    }
+    foreach ($pieces[0] .. $pieces[-1]) {
+      $ret .= "$_,";
+    }
+  }
+  $fields .= $ret;
+}
+
 ######## SOUND-CHANGING SUBROUTINES ########
 
 sub regindex {
   my $word = shift;
   my $scNum = shift;
-  my $regex; # = join "", avantCat ($scNum);
+  my $regex;
   my @avant = avantCat ($scNum);
   foreach (0 .. $#avant) {
     if ($_ % 2 == 0) {
@@ -544,25 +650,50 @@ sub regindex {
     }
   }
   
-#say "ref: ", join ",", @ref;
+#############################################################################################################################
+  my @backrefOrder;
+  for (my $i = 1; $i <= $#absMap; $i += 4) {
+    push @backrefOrder, $absMap[$i] if ($absMap[$i - 1] == $scNum);
+  }
+#say "avt: ", join ",", @avant;
+  my @orderedAvant;
+  foreach (@backrefOrder) {
+    push @orderedAvant, $avant[($_ - 1) * 2], $avant[($_ - 1) * 2 + 1];
+  }
+  @avant = @orderedAvant;
+#say "oav: ", join ",", @avant;
   my @refCopy = @ref;
   while ($#refCopy > -1) {
+    my @backrefs = (0);
     my $toShift = shift @refCopy;
     my @refPart;
     push @refPart, shift @refCopy foreach (1 .. $toShift);
     push @map, (0);
     my $mapCountIndex = $#map;
+    my @orderedRefPart;
+#say "\nrfpt: ", join ",", @refPart;
+#say "bro: ", join ",", @backrefOrder;
+    foreach (@backrefOrder) {
+      push @orderedRefPart, $refPart[$_ - 1];
+    }
+    @refPart = @orderedRefPart;
+#say "rfpt: ", join ",", @refPart;
+    my @backrefOrderCopy = @backrefOrder;
     foreach my $r (0 .. $#refPart) {
+      my $bro = shift @backrefOrderCopy;
       $avant[2 * $r + 1] =~ /\{(.*),(.*)\}/;
       my $lower = $1;
       my $upper = $2;
       my $avant = $avant[2 * $r];
       $avant =~ s/\((.*)\)/$1/;
       my @letters = ();
+      $avant =~ s/\\(\d+)/$backrefs[$1]/;
       my @blacklist = ();
-      my $todo = 1; # hack to make it enter the loop even if $lower is 0
-      while ($todo || $#letters + 1 < $lower || $upper ne "" && $#letters > $upper) {
-        $todo = 0;
+      my $mustdo = 1; # hack to make it enter the loop even if $lower is 0
+      
+      # This loop breaks up what is matched into constituent letters
+      while ($mustdo || $#letters + 1 < $lower || $upper ne "" && $#letters > $upper) {
+        $mustdo = 0;
         my $partCopy = $refPart[$r];
         if ($partCopy eq "") { # if it matched a word boundary
           unshift @letters, "";
@@ -585,16 +716,23 @@ sub regindex {
           @letters = ();
         }
       }
-#say "ltr: ", join ",", @letters;
+      push @backrefs, join "", @letters;
+say "\nltr: ", join ",", @letters;
+say "bkrf: ", join ",", @backrefs;
       my @absMapCopy = @absMap;
-      while ($#absMapCopy > -1) {
+      while ($#absMapCopy + 1) {
         if ($absMapCopy[0] == $scNum) {
           shift @absMapCopy;
-          if ($absMapCopy[0] - 1 == $r) {
+          if ($absMapCopy[0] == $bro) {
             shift @absMapCopy;
             my @old = split ("\\|", shift @absMapCopy);
             @old = (".") if ($old[0] =~ /^\(\?!/); # because of complements
-#say "old: ", join ",", \@old;
+            foreach (0 .. $#old) {
+              if ($old[$_] =~ /^\\(\d+)$/) {
+                $old[$_] = $backrefs[$1];
+              }
+            }
+#say "old: ", join ",", @old;
             my $new = shift @absMapCopy;
             my $index = -1;
             my $apres;
@@ -602,7 +740,6 @@ sub regindex {
             foreach my $l (@letters) {
               foreach my $o (0 .. $#old) {
                 $old[$o] =~ s/\\b//; # otherwise it would try to match "\b" which, of course, never shows up
-#say "$old[$o] eq $l";
                 if ($old[$o] eq $l) {
                   $index = $o;
                   last;
@@ -612,14 +749,19 @@ sub regindex {
                   last;
                 }
               }
+#say "ind: $index";
               unless ($index < 0) {
-                $apres .= (split /\|/, $new)[$index];
+                $apres .= ((split /\|/, $new), "")[$index]; # "" is for when the last is blank (a|b|c|) because it will split that into a,b,c (instead of a,b,c,)
               } else {
                 $apres .= $complement; # word boundaries and complements
               }
+#say "apr: $apres";
             }
             $apres =~ s/\\b//;
-            push @map, $apres;
+            if ($apres =~ /^\\(\d+)$/) {
+              $apres = $backrefs[$1];
+            }
+            push @map, $apres; # figure out that when it says \1 it really doesn't mean that literally
             $map[$mapCountIndex]++;
           } else {
             shift @absMapCopy;
@@ -635,6 +777,7 @@ sub regindex {
       }
     }
   }
+#############################################################################################################################
   foreach (@map) {
     $_ = "" unless (defined $_);
   }
@@ -665,7 +808,6 @@ sub replace {
   die "Overly long word\n" if ($len > 32766);
   
   defined $apres ? eval "\$post =~ s/.\{$len\}/$apres/" : eval "\$post =~ s/.\{$len\}//"; 
-  
   $os += length ("$pre$post") - length ($word);
   return ("$pre$post", $os);
 }
@@ -677,7 +819,7 @@ sub catContents {
   my @fish;
   unless (exists $cats{$name}) {
     warn "Uninitialized category: <$name>\n";
-    return ("");
+    return "";
   }
   foreach (0 .. $#{$cats{$name}}) {
     push @fish, @{$cats{$name}}[$_];
