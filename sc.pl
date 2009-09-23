@@ -19,22 +19,25 @@
 
 # (I don't see the point of copying the full GPL text so if you really care go look it up.)
 
-# Based on sc4.1.pl, with:
-# backreferences to backreferences
-# escaped slashes
-# acceptable Unicode support
-# multiple words files
-# HTML code names
-# custom code names
-# Unicode decomposition
-# properly-escaped pattern-matching characters in dialects
-# multiple consecutive visible comments
+# Based on sc5.pl, with:
+# nothing new yet
+
+# TODO:
+# nonsuffixed backreferences [current]
+# fix -o [unknown]
+# environments [current]
+# more efficient rule parsing [almost done]
+# overwrite warnings [easy]
+# line numbers instead of rule numbers in warnings [partially done]
+# display mode use in warnings [easy]
+# % and ~ in mismatch warnings
+# get rid of "s:" in suffix warnings [clean-up]
 
 ######## SET-UP ########
 
 use charnames ();
 use encoding "UTF-8";
-#use feature "say";
+use feature "say";
 use strict;
 use utf8;
 use warnings;
@@ -410,11 +413,16 @@ sub parseFields {
 ######## VARIABLES ########
 
 my %cats;
+my @tentAbsAnte;
+my @absAnte;
 my @tentAbsAvant;
 my @absAvant;
+my @tentAbsPost;
+my @absPost;
 my @tentAbsApres;
 my @absApres;
 my $scNum = 0;
+my $lineNum = 0;
 my $dialect = "";
 my $tentDialects;
 my @dialects;
@@ -449,8 +457,8 @@ sub rules {
   $rulesRef[0] =~ s/^.//; # Begone, FEFF!
   RULE: foreach (@rulesRef) { # while (<$rulesRef>) {
     # SET-UP
+    $lineNum++;
     next if (/^\s*($|!)/);
-  # chomp;
     ($_) = split /!/, $_;
     $_ = trim ($_);
     
@@ -484,534 +492,90 @@ sub rules {
     }
     next if ($skip);
     
+   #if (/^(?:(?:\[(.*?)\]\s+)|)(.*?)\s+>(?:\s+(.*?))(?:\s+\/\s+(.*?))(?:\s+_\s+(.*?|))(?:(?:\s+\[(\S*?)\])|)$/) {
     if (/\s+>\s+/) {
-      my @rule = split /\s+>\s+/;
-      if (defined $rule[0]) {
-        my @avant = split /\s+/, $rule[0];
-        unless (defined $avant[0]) {
-          warn "Rule ", $scNum + 1, " has no original form\n";
-        } else {
-          if ($avant[0] =~ /\[(.*)\]/) {
-            $tentDialects = $1;
-            shift @avant;
-          } else {
-            $tentDialects = "";
-          }
-          
-          foreach (@avant) {
-            # COMPLEMENTS
-            my $complement = "";
-            my $complement2 = "";
-            $complement = "(?!" if (/^\^/);
-            $complement2 = ")" if (/^\^/);
-            $_ =~ s/^\^//;
-            
-            # QUANTIFIERS AND GREED
-            my $min = 1;
-            my $max = 1;
-            my $greed = "";
-            if (/(?:(?!\\).)\*(\?|)$/) {
-              $min = 0;
-              $max = "";
-              $greed = "?" if ($1 eq "?");
-            } elsif (/(?:(?!\\).)\+(\?|)$/) {
-              $min = 1;
-              $max = "";
-              $greed = "?" if ($1 eq "?");
-            } elsif (/(?:(?!\\).)\{(.*)\}(\?|)$/) {
-              $greed = "?" if ($2 eq "?");
-              if ($1 =~ /(\d+),(\d+)/) {
-                $min = $1;
-                $max = $2;
-              } elsif ($1 =~ /(\d+),/) {
-                $min = $1;
-                $max = "";
-              } elsif ($1 =~ /,(\d+)/) {
-                $min = 0;
-                $max = $1;
-              } elsif ($1 =~ /(\d+)/) {
-                $min = $1;
-                $max = $1;
-              }
-            } elsif (/(?:(?!\\).)\?(\?|)$/) {
-              $min = 0;
-              $max = 1;
-              $greed = "?" if ($1 eq "?");
-            }
-            if ($max ne "" && $min > $max) {
-              my $tmp = $min;
-              $min = $max;
-              $max = $tmp;
-            }
-            $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
-            $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\)/\\$1/;
-            
-            # THE MAIN PART OF THE REGEX
-            $_ =~ s/>\|</>+</g; # change | to + between categories
-            $_ =~ s/#/\\b/g; # change # to \b
-            
-            my @units = split /(?=\+|-)/, $_;
-            my @newUnits;
-#say "units: ", join ",", @units;
-            foreach my $unit (@units) {
-              next if ($unit =~ /^-/);
-              $unit =~ s/\+//;
-              my @subunits = split /\|/, $unit;
-              my @newSubunits;
-#say "subunits: ", join ",", @subunits;
-              foreach my $subunit (@subunits) {
-                my @chars = split //, $subunit;
-                my @quarks = ("");
-                my $angleBrackets = 0;
-                my $bracketed = 0;
-                my $dollarSign = 0;
-                my $backreferenced = 0;
-                while ($#chars + 1) {
-                  if ($chars[0] eq "<") {
-                    $angleBrackets++;
-                    $bracketed = -1;
-                  } elsif ($chars[0] eq ">") {
-                    $angleBrackets--;
-                    $bracketed = 1 if ($angleBrackets == 0);
-                  } else {
-                    $bracketed = 0;
-                  }
-                  if ($chars[0] eq "\$" && !$bracketed) {
-                    $dollarSign = 2;
-                  }
-                  if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
-                    $backreferenced = -1;
-                    $dollarSign = 0;
-                  }
-                  push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
-                  $quarks[-1] .= $chars[0];
-                  $backreferenced = 0;
-                  $dollarSign = 1 if ($dollarSign == 2);
-                  push @quarks, "" if ($bracketed == 1);
-                  shift @chars;
-                }
-                pop @quarks if ($quarks[-1] eq "");
-#say "quarks: ", join ",", @quarks;
-                
-                foreach my $q (0 .. $#quarks) {
-                  if ($quarks[$q] =~ /<(.*?)>/) {
-                    $quarks[$q] = catContents ($1);
-                  } elsif ($quarks[$q] =~ /^\$0*(\d+)$/) {
-                    if ($1 > $#tentAbsAvant + 1) {
-                      unless ($#tentAbsAvant == -1) {
-                        warn "Backreference value greater than \$", $#tentAbsAvant + 1, " found in rule ", $scNum + 1, "\n";
-                      } else {
-                        warn "Backreference found as first index of rule ", $scNum + 1, "\n";
-                      }
-                      next RULE;
-                    } elsif ($1 == 0) {
-                      warn "Backreference \$0 is meaningless because indexes start at 1\n";
-                      next RULE;
-                    } else {
-                      $quarks[$q] = "\\$1";
-                    }
-                  }
-                }
-                
-                while ($#quarks > 0) {
-                  my @one = split /\|/, shift @quarks;
-                  my @two = split /\|/, shift @quarks;
-                  my @tmp = ();
-                  foreach my $one (@one) {
-                    foreach my $two (@two) {
-                      push @tmp, "$one$two";
-                    }
-                  }
-                  unshift @quarks, join "|", @tmp;
-#say "quark: ", $quarks[0];
-                }
-                
-                push @newSubunits, $quarks[0];
-#say "newSubunits: ", join ",", @newSubunits;
-              }
-              push @newUnits, join "|", @newSubunits;
-#say "newUnits: ", join ",", @newUnits;
-            }
-            
-            my $positive = "|" . join "|", @newUnits;
-#say "positive: $positive";
-            
-            @newUnits = ();
-            foreach my $unit (@units) {
-              next unless ($unit =~ /^-/);
-              $unit =~ s/-//;
-              my @subunits = split /\|/, $unit;
-              my @newSubunits;
-#say "-subunits: ", join ",", @subunits;
-              foreach my $subunit (@subunits) {
-                my @chars = split //, $subunit;
-                my @quarks = ("");
-                my $angleBrackets = 0;
-                my $bracketed = 0;
-                my $dollarSign = 0;
-                my $backreferenced = 0;
-                while ($#chars + 1) {
-                  if ($chars[0] eq "<") {
-                    $angleBrackets++;
-                    $bracketed = -1;
-                  } elsif ($chars[0] eq ">") {
-                    $angleBrackets--;
-                    $bracketed = 1 if ($angleBrackets == 0);
-                  } else {
-                    $bracketed = 0;
-                  }
-                  if ($chars[0] eq "\$" && !$bracketed) {
-                    $dollarSign = 2;
-                  }
-                  if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
-                    $backreferenced = -1;
-                    $dollarSign = 0;
-                  }
-                  push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
-                  $quarks[-1] .= $chars[0];
-                  $backreferenced = 0;
-                  $dollarSign = 1 if ($dollarSign == 2);
-                  push @quarks, "" if ($bracketed == 1);
-                  shift @chars;
-                }
-                #shift @quarks if ($quarks[0] eq "");
-                pop @quarks if ($quarks[-1] eq "");
-#say "-quarks: ", join ",", @quarks;
-                
-                foreach my $q (0 .. $#quarks) {
-                  if ($quarks[$q] =~ /<(.*?)>/) {
-                    $quarks[$q] = catContents ($1);
-                  } elsif ($quarks[$q] =~ /^\$0*(\d+)$/) {
-                    if ($1 > $#tentAbsAvant + 1) {
-                      warn "Backreference value greater than \$", $#tentAbsAvant + 1, " found in rule ", $scNum + 1, "\n";
-                      next RULE;
-                    } elsif ($1 == 0) {
-                      warn "Meaningless backreference \$0 found in rule ", $scNum + 1, " (indexes start at 1)\n";
-                      next RULE;
-                    } else {
-                      $quarks[$q] = "\\$1";
-                    }
-                  }
-                }
-                
-                while ($#quarks > 0) {
-                  my @one = split /\|/, shift @quarks;
-                  my @two = split /\|/, shift @quarks;
-                  my @tmp = ();
-                  foreach my $one (@one) {
-                    foreach my $two (@two) {
-                      push @tmp, "$one$two";
-                    }
-                  }
-                  unshift @quarks, join "|", @tmp;
-#say "-quark: ", $quarks[0];
-                }
-                
-                push @newSubunits, $quarks[0];
-#say "-newSubunits: ", join ",", @newSubunits;
-              }
-              push @newUnits, join "|", @newSubunits;
-#say "-newUnits: ", join ",", @newUnits;
-            }
-            
-            $positive .= "|";
-            my @negative = split "\\|", join "|", @newUnits;
-#say "negative: ", join ",", @negative;
-            foreach my $negative (@negative) {
-              $negative =~ s/\\/\\\\/g;
-              $negative =~ s/\\\\\\/\\/g;
-              $positive =~ s/\|$negative\|/\|/g;
-            }
-            $positive =~ s/\|$//;
-            $positive =~ s/^\|//;
-            
-            if (!defined $positive || $positive eq "") {
-              warn "Useless empty string in the first half of rule ", $scNum + 1, "\n";
-              next RULE;
-            }
-#say "POSITIVE: $positive";
-            $positive =~ s/\|/\)\(\?\!/g unless ($complement eq ""); # | -> )(?! if complementing
-            push @tentAbsAvant, "($complement$positive$complement2){$min,$max}$greed";
-          }
+      my @rule = split /\s+/, $_;
+      if ($rule[0] =~ /\[(.*)\]/) {
+        $tentDialects = $1;
+        shift @rule;
+      } else {
+        $tentDialects = "";
+      }
+      if ($rule[-1] =~ /\[(.*)\]/) {
+        my $flags = $1;
+        if ($flags =~ /P/i) {
+          $tentPersist .= "$scNum,";
         }
-        next RULE if ($#tentAbsAvant == -1);
-        
-        my @apres = ("");
-        @apres = split (/\s+/, $rule[1]) if defined $rule[1];
-        if ($apres[-1] =~ /\[(.*)\]/) {
-          my $flags = $1;
-          if ($flags =~ /P/i) {
-            $tentPersist .= "$scNum,";
-          }
-          if ($flags =~ /R/i) {
-            $tentRepeat .= "$scNum,";
-          }
-          pop @apres;
+        if ($flags =~ /R/i) {
+          $tentRepeat .= "$scNum,";
         }
-        if ($apres[0] eq "") {
-          # The apres can be blank. It's okay.
-        } else {
-          foreach (@apres) {
-            # SUFFICES
-            my $suffix = -1;
-            if (/\$0*(\d+)$/) {
-              $suffix = $1;
-            }
-            $_ =~ s/\$(\d+)$//;
-            if ($suffix > $#tentAbsAvant + 1) {
-              warn "Backreference value greater than \$", $#tentAbsAvant + 1, " found in rule ", $scNum + 1, "\n";
-              next RULE;
-            } elsif ($suffix == 0) {
-              warn "Meaningless backreference \$0 found in rule ", $scNum + 1, " (indexes start at 1)\n";
-              next RULE;
-            }
-            
-            $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
-            $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\)/\\$1/;
-            
-            # THE MAIN PART OF THE REGEX
-            $_ =~ s/>\|</>+</g; # change | to + between categories
-            
-            my @units = split /(?=\+|-)/, $_;
-            my @newUnits;
-#say "units: ", join ",", @units;
-            foreach my $unit (@units) {
-              next if ($unit =~ /^-/);
-              $unit =~ s/\+//;
-              my @subunits = split /\|/, $unit;
-              my @newSubunits;
-#say "subunits: ", join ",", @subunits;
-              foreach my $subunit (@subunits) {
-                $subunit = "" unless (defined $subunit);
-                my @chars = split //, $subunit;
-                my @quarks = ("");
-                my $angleBrackets = 0;
-                my $bracketed = 0;
-                my $dollarSign = 0;
-                my $backreferenced = 0;
-                while ($#chars + 1) {
-                  if ($chars[0] eq "<") {
-                    $angleBrackets++;
-                    $bracketed = -1;
-                  } elsif ($chars[0] eq ">") {
-                    $angleBrackets--;
-                    $bracketed = 1 if ($angleBrackets == 0);
-                  } else {
-                    $bracketed = 0;
-                  }
-                  if ($chars[0] eq "\$" && !$bracketed) {
-                    $dollarSign = 2;
-                  }
-                  if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
-                    $backreferenced = -1;
-                    $dollarSign = 0;
-                  }
-                  push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
-                  $quarks[-1] .= $chars[0];
-                  $backreferenced = 0;
-                  $dollarSign = 1 if ($dollarSign == 2);
-                  push @quarks, "" if ($bracketed == 1);
-                  shift @chars;
-                }
-                pop @quarks if ($quarks[-1] eq "");
-#say "quarks: ", join ",", @quarks;
-                
-                foreach my $q (0 .. $#quarks) {
-                  if ($quarks[$q] =~ /<(.*?)>/) {
-                    $quarks[$q] = catContents ($1);
-                  } elsif ($quarks[$q] =~ /^\$0*(\d+)$/) {
-                    if ($1 > $#tentAbsAvant + 1) {
-                      unless ($#tentAbsAvant == -1) {
-                        warn "Backreference value greater than \$", $#tentAbsAvant + 1, " found in rule ", $scNum + 1, "\n";
-                      } else {
-                        warn "Meaningless backreference \$0 found in rule ", $scNum + 1, " (indexes start at 1)\n";
-                      }
-                      next RULE;
-                    } elsif ($1 == 0) {
-                      warn "Meaningless backreference \$0 found in rule ", $scNum + 1, " (indexes start at 1)\n";
-                      next RULE;
-                    } else {
-                      $quarks[$q] = "\$theAvant[$1]";
-                    }
-                  }
-                }
-                
-                while ($#quarks > 0) {
-                  my @one = split /\|/, shift @quarks;
-                  my @two = split /\|/, shift @quarks;
-                  my @tmp = ();
-                  foreach my $one (@one) {
-                    foreach my $two (@two) {
-                      push @tmp, "$one$two";
-                    }
-                  }
-                  unshift @quarks, join "|", @tmp;
-                  $quarks[0] = "" unless (defined $quarks[0]);
-#say "quark: ", $quarks[0];
-                }
-                
-                push @newSubunits, $quarks[0];
-                foreach (0 .. $#newSubunits) {
-                  $newSubunits[$_] = "" unless (defined $newSubunits[$_]);
-                }
-#say "newSubunits: ", join ",", @newSubunits;
-              }
-              push @newUnits, join "|", @newSubunits;
-#say "newUnits: ", join ",", @newUnits;
-            }
-            
-            my $positive = "|" . join "|", @newUnits;
-#say "positive: $positive";
-            
-            @newUnits = ();
-            foreach my $unit (@units) {
-              next unless ($unit =~ /^-/);
-              $unit =~ s/-//;
-              my @subunits = split /\|/, $unit;
-              my @newSubunits;
-#say "-subunits: ", join ",", @subunits;
-              foreach my $subunit (@subunits) {
-                my @chars = split //, $subunit;
-                my @quarks = ("");
-                my $angleBrackets = 0;
-                my $bracketed = 0;
-                my $dollarSign = 0;
-                my $backreferenced = 0;
-                while ($#chars + 1) {
-                  if ($chars[0] eq "<") {
-                    $angleBrackets++;
-                    $bracketed = -1;
-                  } elsif ($chars[0] eq ">") {
-                    $angleBrackets--;
-                    $bracketed = 1 if ($angleBrackets == 0);
-                  } else {
-                    $bracketed = 0;
-                  }
-                  if ($chars[0] eq "\$" && !$bracketed) {
-                    $dollarSign = 2;
-                  }
-                  if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
-                    $backreferenced = -1;
-                    $dollarSign = 0;
-                  }
-                  push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
-                  $quarks[-1] .= $chars[0];
-                  $backreferenced = 0;
-                  $dollarSign = 1 if ($dollarSign == 2);
-                  push @quarks, "" if ($bracketed == 1);
-                  shift @chars;
-                }
-                #shift @quarks if ($quarks[0] eq "");
-                pop @quarks if ($quarks[-1] eq "");
-#say "-quarks: ", join ",", @quarks;
-                
-                foreach my $q (0 .. $#quarks) {
-                  if ($quarks[$q] =~ /<(.*?)>/) {
-                    $quarks[$q] = catContents ($1);
-                  } elsif ($quarks[$q] =~ /^\$0*(\d+)$/) {
-                    if ($1 > $#tentAbsAvant + 1) {
-                      warn "Backreference value greater than \$", $#tentAbsAvant + 1, " found in rule ", $scNum + 1, "\n";
-                      next RULE;
-                    } elsif ($1 == 0) {
-                      warn "Meaningless backreference \$0 found in rule ", $scNum + 1, " (indexes start at 1)\n";
-                      next RULE;
-                    } else {
-                      $quarks[$q] = "\$theAvant[$1]";
-                    }
-                  }
-                }
-                
-                while ($#quarks > 0) {
-                  my @one = split /\|/, shift @quarks;
-                  my @two = split /\|/, shift @quarks;
-                  my @tmp = ();
-                  foreach my $one (@one) {
-                    foreach my $two (@two) {
-                      push @tmp, "$one$two";
-                    }
-                  }
-                  unshift @quarks, join "|", @tmp;
-                  $quarks[0] = "" unless (defined $quarks[0]);
-#say "-quark: ", $quarks[0];
-                }
-                
-                push @newSubunits, $quarks[0];
-#say "-newSubunits: ", join ",", @newSubunits;
-              }
-              push @newUnits, join "|", @newSubunits;
-#say "-newUnits: ", join ",", @newUnits;
-            }
-            
-            $positive .= "|";
-            my @negative = split "\\|", join "|", @newUnits;
-#say "negative: ", join ",", @negative;
-            foreach my $negative (@negative) {
-              $negative =~ s/\\/\\\\/g;
-              $negative =~ s/\\\\\\/\\/g;
-              $negative =~ s/\$/\\\$/g;
-              $negative =~ s/\[/\\\[/g;
-              $negative =~ s/\]/\\\]/g;
-              $positive =~ s/\|$negative\|/\|/g;
-            }
-            $positive =~ s/^\|//;
-            $positive =~ s/\|$//;
-            
-            my $oldPositive;
-            my $min;
-            my $max;
-            if ($suffix == -1) {
-              $oldPositive = $positive;
-              $min = 1;
-              $max = 1;
-            } else {
-              $oldPositive = $tentAbsAvant[$suffix - 1];
-              $oldPositive =~ s/^\(//;
-              $oldPositive =~ s/\)\{(\d*),(\d*)\}\??$//;
-              $min = $1;
-              $max = $2;
-              if ($oldPositive =~ /^\(\?!(.*?)\)\.$/) {
-                $oldPositive = $1;
-              }
-            }
-            $oldPositive =~ s/\\(\d+)/\$theAvant[$1]/g;
-            
-            if ($oldPositive =~ /^\(\?!/) {
-              warn "Backreference to a complement found in rule ", $scNum + 1, "\n";
-              next RULE;
-            }
-            
-            if ($positive eq "") {
-              if ($suffix == -1) {
-                warn "Useless empty string in the second half of rule ", $scNum + 1, "\n";
-                next RULE;
-              } else {
-                $positive = $oldPositive;
-              }
-            } elsif (($positive =~ tr/\|//) > 0) {
-              if ($suffix == -1) {
-                warn "Backreference needed for <$positive> in rule ", $scNum + 1, "\n";
-                next RULE;
-              }
-            }
-            if (($positive =~ tr/\|//) < ($oldPositive =~ tr/\|//)) {
-              warn "Length mismatch for \$$suffix found in rule ", $scNum + 1, " (", ($positive =~ tr/\|//) + 1, " < ", ($oldPositive =~ tr/\|//) + 1, ")\n";
-              next RULE;
-            }
-            if ($exact && ($positive =~ tr/\|//) != ($oldPositive =~ tr/\|//)) {
-              warn "Length mismatch for \$$suffix found in rule ", $scNum + 1, " (", ($positive =~ tr/\|//) + 1, " != ", ($oldPositive =~ tr/\|//) + 1, ")\n";
-              next RULE if ($exact == 2);
-            }
-            push @tentAbsApres, [$oldPositive, $min, $max, $positive, $suffix];
-          }
-        next RULE if ($#tentAbsAvant == -1);
-        }
-        push @absAvant, [@tentAbsAvant];
-        push @absApres, [@tentAbsApres];
-        $persist .= $tentPersist;
-        $repeat .= $tentRepeat;
-        push @dialects, $tentDialects;
-        push @dialectsPersist, $tentDialects unless ($tentPersist eq "");
-      } # if (defined $rule[0])
+        pop @rule;
+      }
+      my @avant;
+      push @avant, shift @rule while ($rule[0] ne ">");
+      shift @rule;
+      my @apres;
+      push @apres, shift @rule while (defined $rule[0] && $rule[0] ne "/");
+      my $extantEnv = defined $rule[0] && $rule[0] eq "/" ? 1 : 0;
+      shift @rule;
+      my @ante;
+      push @ante, shift @rule while (defined $rule[0] && $rule[0] ne "_");
+      my $goodEnv = defined $rule[0] && $rule[0] eq "_" ? 1 : 0;
+      shift @rule;
+      my @post;
+      push @post, shift @rule while (defined $rule[0]);
+      shift @rule;
+      
+      unless ($#avant + 1) {
+        warn "Empty BEFORE in line $lineNum\n";
+        next RULE;
+      }
+      unless ($goodEnv || !$extantEnv) {
+        warn "Malformed ENV in line $lineNum\n";
+        next RULE;
+      }
+#say join ",", @avant;
+#say join ",", @apres;
+#say join ",", @ante;
+#say join ",", @post;
+      
+      @tentAbsAnte = parse (1, @ante);
+      @tentAbsAvant = parse (2, @avant);
+      @tentAbsPost = parse (3, @post);
+      @tentAbsApres = parse (4, @apres);
+      
+#say "ta1: $#tentAbsAnte";
+#say "ta2: $#tentAbsAvant";
+#say "ta3: $#tentAbsPost";
+#say "ta4: $#tentAbsApres";
+
+#foreach (0 .. $#tentAbsAnte) {
+#  my @tan = @{$tentAbsAnte[$_]};
+#  say "tan: ", join ",", @tan;
+#}
+#foreach (0 .. $#tentAbsAvant) {
+#  my @tav = @{$tentAbsAvant[$_]};
+#  say "tav: ", join ",", @tav;
+#}
+#foreach (0 .. $#tentAbsPost) {
+#  my @tpo = @{$tentAbsPost[$_]};
+#  say "tpo: ", join ",", @tpo;
+#}
+#foreach (0 .. $#tentAbsApres) {
+#  my @tap = @{$tentAbsApres[$_]};
+#  say "tap: ", join ",", @tap;
+#}
+#say "";
+      
+      next RULE unless ($#tentAbsAnte + 1 || $#tentAbsAvant + 1 || $#tentAbsPost + 1);
+      push @absAnte, [@tentAbsAnte];
+      push @absAvant, [@tentAbsAvant];
+      push @absPost, [@tentAbsPost];
+      push @absApres, [@tentAbsApres];
+      $persist .= $tentPersist;
+      $repeat .= $tentRepeat;
+      push @dialects, $tentDialects;
+      push @dialectsPersist, $tentDialects unless ($tentPersist eq "");
       $scNum++;
     } elsif (/=/) {
       (my $cat, my $contents) = split /=/, $_, 2;
@@ -1030,32 +594,13 @@ sub rules {
     } elsif (/^#(:*)(\s*)(.*)$/) {
       push @colon, $scNum, length $1, $3;
     } else {
-      warn "Unparsable statement \"$_\" ignored\n" unless ($skipping);
+      warn "Unparsable statement \"$_\" on line $lineNum\n" unless ($skipping);
     }
   }
   close $rulesRef;
 }
 
 #say "col: ", join ",", @colon;
-#say "aav:";
-#foreach (0 .. $#absAvant) {
-#  foreach (@{$absAvant[$_]}) {
-#    say "$_";
-#  }
-#  say "EOL";
-#}
-#say "aap:";
-#foreach (0 .. $#absApres) {
-#  my @tap = @{$absApres[$_]});
-#  foreach (0 .. $#tap) {
-#    my @qwe = @{$tap[$_]};
-#    foreach (@qwe) {
-#      say "$_";
-#    }
-#    say "EOU";
-#  }
-#  say "EOL";
-#}
 #foreach my $name (keys %cats) {
 #  print "$name: ";
 #  foreach (0 .. $#{$cats{$name}}) {
@@ -1065,16 +610,485 @@ sub rules {
 #}
 #say "p:   [$persist]";
 #say "r:   [$repeat]";
-#say "d: [$dialect]";
+#say "d:   [$dialect]";
 #say "d:   ", join ",", @dialects;
 #say "dp:  ", join ",", @dialectsPersist;
 #say "w:   ", join ",", @words;
 #say "rul: ", $#absAvant + 1;
 
+######## PARSING SUBROUTINES ########
+
+sub parse {
+  my $parseMode = shift;
+  my @ret;
+  foreach (@_) {
+    my $complement = "";
+    my $complement2 = "";
+    my $greed = "";
+    my $min = 1;
+    my $max = 1;
+    unless ($parseMode == 4) {
+      # COMPLEMENTS
+      $complement = "(?!" if (/^\^/);
+      $complement2 = ")" if (/^\^/);
+      $_ =~ s/^\^//;
+      
+      # QUANTIFIERS AND GREED
+      if (/(?:(?!\\).)\*(\?|)$/) {
+        $min = 0;
+        $max = "";
+        $greed = "?" if ($1 eq "?");
+      } elsif (/(?:(?!\\).)\+(\?|)$/) {
+        $min = 1;
+        $max = "";
+        $greed = "?" if ($1 eq "?");
+      } elsif (/(?:(?!\\).)\{(.*)\}(\?|)$/) {
+        $greed = "?" if ($2 eq "?");
+        if ($1 =~ /(\d+),(\d+)/) {
+          $min = $1;
+          $max = $2;
+        } elsif ($1 =~ /(\d+),/) {
+          $min = $1;
+          $max = "";
+        } elsif ($1 =~ /,(\d+)/) {
+          $min = 0;
+          $max = $1;
+        } elsif ($1 =~ /(\d+)/) {
+          $min = $1;
+          $max = $1;
+        }
+      } elsif (/(?:(?!\\).)\?(\?|)$/) {
+        $min = 0;
+        $max = 1;
+        $greed = "?" if ($1 eq "?");
+      }
+      if ($max ne "" && $min > $max) {
+        my $tmp = $min;
+        $min = $max;
+        $max = $tmp;
+      }
+    }
+    
+    # SUFFICES
+    my $suffixType = "";
+    my $suffix = -1;
+    my @tempAbsFoo;
+    if ($parseMode >= 1 && /%0*(\d+)$/) {
+      $suffix = $1;
+      $suffixType = "%";
+      $parseMode == 1 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsAnte);
+      unless (($parseMode == 1 && defined $ret[$suffix - 1]) || defined $tentAbsAnte[$suffix - 1]) {
+        if (($parseMode == 1 && $#ret + 1) || $#tentAbsAnte + 1) {
+          my $warnNum = $parseMode == 1 ? $#ret + 1 : $#tentAbsAnte + 1;
+          warn "s:Backreference value greater than %$warnNum found in line $lineNum\n";
+        } else {
+          warn "s:Backreference to empty PRE found in line $lineNum\n";
+        }
+        return;
+      }
+      if ($suffix == 0) {
+        warn "Meaningless backreference %0 found in line $lineNum (indexes start at 1)\n";
+        return;
+      }
+    }
+    if ($parseMode >= 2 && /\$0*(\d+)$/) {
+      $suffix = $1;
+      $suffixType = "%\$";
+      $parseMode == 2 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsAvant);
+      unless (($parseMode == 2 && defined $ret[$suffix - 1]) || defined $tentAbsAvant[$suffix - 1]) {
+        if (($parseMode == 2 && $#ret + 1) || $#tentAbsAvant + 1) {
+          my $warnNum = $parseMode == 2 ? $#ret + 1 : $#tentAbsAvant + 1;
+          warn "s:Backreference value greater than \$$warnNum found in line $lineNum\n";
+        } else {
+          warn "s:Backreference to empty BEFORE found in line $lineNum\n";
+        }
+        return;
+      }
+      if ($suffix == 0) {
+        warn "Meaningless backreference \$0 found in line $lineNum (indexes start at 1)\n";
+        return;
+      }
+    }
+    if ($parseMode >= 3 && /~0*(\d+)$/) {
+      $suffix = $1;
+      $suffixType = "%\$~";
+      $parseMode == 3 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsPost);
+      unless (($parseMode == 3 && defined $ret[$suffix - 1]) || defined $tentAbsPost[$suffix - 1]) {
+        if (($parseMode == 3 && $#ret + 1) || $#tentAbsPost + 1) {
+          my $warnNum = $parseMode == 3 ? $#ret + 1 : $#tentAbsPost + 1;
+          warn "s:Backreference value greater than ~$warnNum found in line $lineNum\n";
+        } else {
+          warn "s:Backreference to empty POST found in line $lineNum\n";
+        }
+        return;
+      }
+      if ($suffix == 0) {
+        warn "Meaningless backreference ~0 found in line $lineNum (indexes start at 1)\n";
+        return;
+      }
+    }
+    if ($parseMode >= 1 && /%(\d+)$/) {
+      $_ =~ s/%(\d+)$//;
+    } elsif ($parseMode >= 2 && /\$(\d+)$/) {
+      $_ =~ s/\$(\d+)$//;
+    } elsif ($parseMode >= 3 && /~(\d+)$/) {
+      $_ =~ s/~(\d+)$//;
+    }
+#say "suf: $suffix";
+    
+    if ($suffix != -1) {
+      if ($complement ne "") {
+        warn "Backreference and complement found together in line $lineNum\n";
+        return;
+      }
+      if ($min != 1 || $max != 1) {
+        warn "Backreference and quantifier found together in line $lineNum\n";
+        return;
+      }
+    }
+    
+    $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
+    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\)/\\$1/;
+    
+    # THE MAIN PART OF THE REGEX
+    $_ =~ s/>\|</>+</g; # change | to + between categories
+    
+    my @units = split /(?=\+|-)/, $_;
+    my @newUnits;
+#say "units: ", join ",", @units;
+    foreach my $unit (@units) {
+      next if ($unit =~ /^-/);
+      $unit =~ s/\+//;
+      my @subunits = split /\|/, $unit;
+      my @newSubunits;
+#say "subunits: ", join ",", @subunits;
+      foreach my $subunit (@subunits) {
+        $subunit = "" unless (defined $subunit);
+        my @chars = split //, $subunit;
+        my @quarks = ("");
+        my $angleBrackets = 0;
+        my $bracketed = 0;
+        my $dollarSign = 0;
+        my $backreferenced = 0;
+        while ($#chars + 1) {
+          if ($chars[0] eq "<") {
+            $angleBrackets++;
+            $bracketed = -1;
+          } elsif ($chars[0] eq ">") {
+            $angleBrackets--;
+            $bracketed = 1 if ($angleBrackets == 0);
+          } else {
+            $bracketed = 0;
+          }
+          if ($chars[0] eq "\$" && !$bracketed) {
+            $dollarSign = 2;
+          }
+          if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
+            $backreferenced = -1;
+            $dollarSign = 0;
+          }
+          push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
+          $quarks[-1] .= $chars[0];
+          $backreferenced = 0;
+          $dollarSign = 1 if ($dollarSign == 2);
+          push @quarks, "" if ($bracketed == 1);
+          shift @chars;
+        }
+        pop @quarks if ($quarks[-1] eq "");
+#say "quarks: ", join ",", @quarks;
+        
+        foreach my $q (0 .. $#quarks) {
+          if ($quarks[$q] =~ /<(.*?)>/) {
+            $quarks[$q] = catContents ($1);
+          } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
+            if ($1 eq "%") {
+#              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
+#                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
+#                  warn "Backreference in the first index of PRE found in line $lineNum\n";
+#                } else {
+#                  warn "Backreference value greater than %$2 found in line $lineNum\n";
+#                }
+#                return;
+#              } elsif ($2 == 0) {
+#                warn "Meaningless backereference %0 found in line $lineNum\n";
+#                return;
+#              } else {
+                if (1 || $parseMode == 4) {
+                  $quarks[$q] = "\$old[" . ($2 - 1) . "]";
+                } else {
+                  $quarks[$q] = "\\$2";
+                }
+#              }
+            } elsif ($1 eq "\$" && $parseMode >= 2) {
+#              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
+#                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
+#                  warn "Backreference in the first index of BEFORE found in line $lineNum\n";
+#                } else {
+#                  warn "Backreference value greater than \$$2 found in line $lineNum\n";
+#                }
+#                return;
+#              } elsif ($2 == 0) {
+#                warn "Meaningless backereference \$0 found in line $lineNum\n";
+#                return;
+#              } else {
+                if (1 || $parseMode == 4) {
+                  $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + 0) . "]";
+                } else {
+                  $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + 1);
+                }
+#              }
+            } elsif ($1 eq "~" && $parseMode >= 3) {
+#              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
+#                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
+#                  warn "Backreference in the first index of POST found in line $lineNum\n";
+#                } else {
+#                  warn "Backreference value greater than ~$2 found in line $lineNum\n";
+#                }
+#                return;
+#              } elsif ($2 == 0) {
+#                warn "Meaningless backereference ~0 found in line $lineNum\n";
+#                return;
+#              } else {
+                if (1 || $parseMode == 4) {
+                  $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 1) . "]";
+                } else {
+                  $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 2);
+                }
+#              }
+            }
+          }
+        }
+        
+        while ($#quarks > 0) {
+          my @one = split /\|/, shift @quarks;
+          my @two = split /\|/, shift @quarks;
+          my @tmp = ();
+          foreach my $one (@one) {
+            foreach my $two (@two) {
+              push @tmp, "$one$two";
+            }
+          }
+          unshift @quarks, join "|", @tmp;
+          $quarks[0] = "" unless (defined $quarks[0]);
+#say "quark: ", $quarks[0];
+        }
+        
+        push @newSubunits, $quarks[0];
+        foreach (0 .. $#newSubunits) {
+          $newSubunits[$_] = "" unless (defined $newSubunits[$_]);
+        }
+#say "newSubunits: ", join ",", @newSubunits;
+      }
+      push @newUnits, join "|", @newSubunits;
+#say "newUnits: ", join ",", @newUnits;
+    }
+    
+    my $positive = "|" . join "|", @newUnits;
+#say "positive: $positive";
+    
+    @newUnits = ();
+    foreach my $unit (@units) {
+      next unless ($unit =~ /^-/);
+      $unit =~ s/-//;
+      my @subunits = split /\|/, $unit;
+      my @newSubunits;
+#say "-subunits: ", join ",", @subunits;
+      foreach my $subunit (@subunits) {
+        my @chars = split //, $subunit;
+        my @quarks = ("");
+        my $angleBrackets = 0;
+        my $bracketed = 0;
+        my $dollarSign = 0;
+        my $backreferenced = 0;
+        while ($#chars + 1) {
+          if ($chars[0] eq "<") {
+            $angleBrackets++;
+            $bracketed = -1;
+          } elsif ($chars[0] eq ">") {
+            $angleBrackets--;
+            $bracketed = 1 if ($angleBrackets == 0);
+          } else {
+            $bracketed = 0;
+          }
+          if ($chars[0] eq "\$" && !$bracketed) {
+            $dollarSign = 2;
+          }
+          if ($dollarSign == 1 && $chars[0] !~ /^\d/) {
+            $backreferenced = -1;
+            $dollarSign = 0;
+          }
+          push @quarks, "" if (($bracketed == -1 && $quarks[-1] ne "") || ($dollarSign == 2 && $quarks[-1] ne "") || $backreferenced == -1);
+          $quarks[-1] .= $chars[0];
+          $backreferenced = 0;
+          $dollarSign = 1 if ($dollarSign == 2);
+          push @quarks, "" if ($bracketed == 1);
+          shift @chars;
+        }
+#shift @quarks if ($quarks[0] eq "");
+        pop @quarks if ($quarks[-1] eq "");
+#say "-quarks: ", join ",", @quarks;
+        
+        foreach my $q (0 .. $#quarks) {
+          if ($quarks[$q] =~ /<(.*?)>/) {
+            $quarks[$q] = catContents ($1);
+          } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
+            if ($1 eq "%") {
+              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
+                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
+                  warn "Backreference in the first index of PRE found in line $lineNum\n";
+                } else {
+                  warn "Backreference value greater than %$2 found in line $lineNum\n";
+                }
+                return;
+              } elsif ($2 == 0) {
+                warn "Meaningless backereference %0 found in line $lineNum\n";
+                return;
+              } else {
+                if ($parseMode == 4) {
+                  $quarks[$q] = "\$old[$2]";
+                } else {
+                  $quarks[$q] = "\\$2";
+                }
+              }
+            } elsif ($1 eq "\$" && $parseMode >= 2) {
+              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
+                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
+                  warn "Backreference in the first index of BEFORE found in line $lineNum\n";
+                } else {
+                  warn "Backreference value greater than \$$2 found in line $lineNum\n";
+                }
+                return;
+              } elsif ($2 == 0) {
+                warn "Meaningless backereference \$0 found in line $lineNum\n";
+                return;
+              } else {
+                if ($parseMode == 4) {
+                  $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
+                } else {
+                  $quarks[$q] = "\\" . $2 + $#tentAbsAnte + 1;
+                }
+              }
+            } elsif ($1 eq "~" && $parseMode >= 3) {
+              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
+                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
+                  warn "Backreference in the first index of POST found in line $lineNum\n";
+                } else {
+                  warn "Backreference value greater than ~$2 found in line $lineNum\n";
+                }
+                return;
+              } elsif ($2 == 0) {
+                warn "Meaningless backereference ~0 found in line $lineNum\n";
+                return;
+              } else {
+                if ($parseMode == 4) {
+                  $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
+                } else {
+                  $quarks[$q] = "\\" . $2 + $#tentAbsAnte + $#tentAbsAvant + 2;
+                }
+              }
+            }
+          }
+        }
+        
+        while ($#quarks > 0) {
+          my @one = split /\|/, shift @quarks;
+          my @two = split /\|/, shift @quarks;
+          my @tmp = ();
+          foreach my $one (@one) {
+            foreach my $two (@two) {
+              push @tmp, "$one$two";
+            }
+          }
+          unshift @quarks, join "|", @tmp;
+          $quarks[0] = "" unless (defined $quarks[0]);
+#say "-quark: ", $quarks[0];
+        }
+        
+        push @newSubunits, $quarks[0];
+#say "-newSubunits: ", join ",", @newSubunits;
+      }
+      push @newUnits, join "|", @newSubunits;
+#say "-newUnits: ", join ",", @newUnits;
+    }
+    
+    $positive .= "|";
+    my @negative = split "\\|", join "|", @newUnits;
+#say "negative: ", join ",", @negative;
+    foreach my $negative (@negative) {
+      $negative =~ s/\\/\\\\/g;
+      $negative =~ s/\\\\\\/\\/g;
+      $negative =~ s/\$/\\\$/g;
+      $negative =~ s/\[/\\\[/g;
+      $negative =~ s/\]/\\\]/g;
+      $positive =~ s/\|$negative\|/\|/g;
+    }
+    $positive =~ s/^\|//;
+    $positive =~ s/\|$//;
+    
+    my $oldPositive;
+    my $minS;
+    my $maxS;
+    if ($suffix == -1) {
+      $oldPositive = $positive;
+      $minS = 1;
+      $maxS = 1;
+    } else {
+      $oldPositive = $tempAbsFoo[$suffix - 1][3];
+#say "oP: $oldPositive/$suffix";
+      $oldPositive =~ s/^\(//;
+      $oldPositive =~ s/\)\{(\d*),(\d*)\}\??$//;
+      $minS = $1;
+      $maxS = $2;
+      if ($oldPositive =~ /^\(\?!(.*?)\)\.$/) {
+        $oldPositive = $1;
+      }
+    }
+    $oldPositive =~ s/\\(\d+)/\$old[$1]/g;
+    if ($oldPositive =~ /^\(\?!/) {
+      warn "Backreference to a complement found in line $lineNum\n";
+      return;
+    }
+    
+    if ($positive eq "") {
+      if ($suffix == -1 && $parseMode == 4) {
+        warn "Useless empty string in the AFTER of line $lineNum\n";
+        return;
+      } else {
+        $positive = $oldPositive;say "pos = $positive";
+      }
+    } elsif (($positive =~ tr/\|//) > 0) {
+      if ($suffix == -1 && $parseMode == 4) {
+        warn "Backreference needed for <$positive> in the AFTER of line $lineNum\n";
+        return;
+      }
+    }
+#say (($positive =~ tr/\|//), " -$positive-$oldPositive- ", ($oldPositive =~ tr/\|//));
+    if (($positive =~ tr/\|//) < ($oldPositive =~ tr/\|//)) {
+      warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " < ", ($oldPositive =~ tr/\|//) + 1, ")\n";
+      return; # don't do "$"
+    }
+    if ($exact && ($positive =~ tr/\|//) != ($oldPositive =~ tr/\|//)) {
+      warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " != ", ($oldPositive =~ tr/\|//) + 1, ")\n";
+      return if ($exact == 2); # don't do "$"
+    }
+#say "POSITIVE: $positive";
+    $suffix += $#tentAbsAnte + 1 if ($suffixType =~ /\$|~/);
+    $suffix += $#tentAbsAvant + 1 if ($suffixType =~ /~/);
+    if (1 || $parseMode != 1) { # wasn't 1 || # was^2 == 4
+      push @ret, [$oldPositive, $min, $max, $positive, $suffix, $greed];
+#say "push [$oldPositive, $min, $max, $positive, $suffix]";
+    } else {
+      push @ret, "($complement$positive$complement2){$min,$max}$greed";
+    }
+  }
+#say "ret: ", join ",", @ret;
+  return @ret;
+}
+
 ######## WORDS ########
 
-my @theAvant;
-my @theApres;
+my @old;
+my @new;
 
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
@@ -1104,7 +1118,8 @@ foreach my $dial (split //, $dialect) {
       next SC if ($persist =~ /,$sc,/);
       next SC unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial));
       
-      @index = regindex ($wordCopy, $sc);
+      @index = regindex ($wordCopy, $sc); # not working
+say "ind: ", join ",", @index;
       my $offset = 0;
       while (@index > 0) {
         ($wordCopy, $offset) = replace ($sc, $wordCopy, $offset, shift @index, shift @index);
@@ -1141,11 +1156,99 @@ foreach my $dial (split //, $dialect) {
 
 ######## SOUND-CHANGING SUBROUTINES ########
 
+# format for @oldIndiv:
+# $oldIndiv[0] -> $oldIndiv[0][0]: f
+# $oldIndiv[1]                     <empty>
+# $oldIndiv[2] -> $oldIndiv[2][0]: o
+#              -> $oldIndiv[2][1]: u
+# (given f h? o|u+ with word <foub>)
+
 sub regindex {
+say "";
+  my $word = shift;
+  die "\nError: Long word\n" if (length $word > 32766);
+  my $scNum = shift;
+  my $regex = "";
+  my @before = (@{$absAnte[$scNum]}, @{$absAvant[$scNum]}, @{$absPost[$scNum]});
+  
+#foreach (0 .. $#before) { my @ante2 = @{$before[$_]}; say "before: ", join ",", @ante2; }
+  
+  my $greatestIndex = 0;
+  for (my $i = 0; $i < length $word; $i++) {
+    my @old;
+    my @oldIndiv;
+    foreach (0 .. $#before) {
+      my @before2 = @{$before[$_]};
+      (my $old, my $min, my $max, my $new, my $suffix, my $greed) = @before2[0 .. 5];
+      if ($suffix == -1) {
+        $regex = $new;
+      } else {
+        my @oldMatches = $old[$suffix];
+        my @oldChoices = split /\|/, $old;
+        foreach my $oldMatch (@oldMatches) {
+          my $choiceIndex = -1;
+          OLDCHOICES: foreach (0 .. $#oldChoices) {
+            if ($oldChoices[$_] eq $oldMatch) {
+              $choiceIndex = $_;
+              last OLDCHOICES;
+            }
+          }
+          $regex = (split /\|/, $new)[$choiceIndex] . "|";
+        }
+        $regex =~ s/\|$//;
+      }
+      $regex = "($regex" . "){$min,$max}$greed";
+      
+say "$word =~ /(?:^$allOlds)$regex/";
+      if ($word =~ /(?:^.{$i}$allOlds)$regex/) {
+#say "$& is made of {$min to $max} <$new>s. We must figure out how many of which!";
+        
+        my $matched = "";
+        my $unit = $&;
+        my @units;
+        my @blacklist;
+        
+        BLACKLIST: while (1) {
+#say "$min~$max*$unit";
+          for (my $i = 0; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
+            my $lookFor = blacken ($new, $blacklist[$i - 0]);
+#say "look for $lookFor";
+            $unit =~ s/($lookFor)$//;
+            $matched = $1;
+            unshift @units, $matched;
+          }
+          
+          if ($#units + 1 < $min || $max ne "" && $#units > $max) {
+            defined $units[-1] ? $blacklist[0] .= "|$units[-1]" : $blacklist[0] .= "";
+            @units = ();
+          } else {
+            last BLACKLIST;
+          }
+        } # BLACKLIST
+        say "units: ", join ",", @units;
+        push @old, [@units];
+      } # =~
+      
+    } # @before
+  } # length $word
+
+foreach (0 .. $#old) { my @old2 = @{$old[$_]}; say "old: ", join ",", @old2; }
+}
+
+sub blacken {
+  my $white = shift;
+  my $black = shift;
+  $black = "" unless (defined $black);
+  $white =~ s/$black//g;
+  $white =~ s/^\|//;
+  return $white;
+}
+
+sub regindex2 {
   my $word = shift;
   my $scNum = shift;
   my $regex;
-  my @avant = @{$absAvant[$scNum]};
+  my @avant = @{$absAvant[$scNum]}; # dinnae work 'case there's a new format the nou
   foreach (0 .. $#avant) {
     $regex .= "($avant[$_])";
   }
@@ -1174,7 +1277,7 @@ sub regindex {
       push @ref, @tmpRef;
     }
   }
-  @theAvant = @ref;
+  @old = @ref;
   return @ret;
 }
 
@@ -1188,8 +1291,8 @@ sub replace {
   my $pre = substr ($word, 0, $pos);
   my $post = substr ($word, $pos);
   my @avant = (0);
-  my $theAvantShift = shift @theAvant;
-  push @avant, shift @theAvant foreach (1 .. $theAvantShift);
+  my $oldShift = shift @old;
+  push @avant, shift @old foreach (1 .. $oldShift);
   
   my $apres;	
   foreach (0 .. $#apres) {
@@ -1197,8 +1300,8 @@ sub replace {
     if ($suffix == -1) {
       $apres .= $new;
     } else {
-      $old =~ s/\$theAvant\[(\d+)\]/$avant[$1]/g;
-      $new =~ s/\$theAvant\[(\d+)\]/$avant[$1]/g;
+      $old =~ s/\$old\[(\d+)\]/$avant[$1]/g;
+      $new =~ s/\$old\[(\d+)\]/$avant[$1]/g;
       my $unit = $avant[$suffix];
       my $matched;
       my @units;
@@ -1238,15 +1341,6 @@ sub replace {
   defined $apres ? eval "\$post =~ s/.\{$len\}/$apres/" : eval "\$post =~ s/.\{$len\}//";
   $os += length ("$pre$post") - length ($word);
   return ("$pre$post", $os);
-}
-
-sub blacken {
-  my $white = "|" . shift;
-  my $black = shift;
-  $black = "" unless (defined $black);
-  $white =~ s/$black//g;
-  $white =~ s/^\|//;
-  return $white;
 }
 
 ######## CATEGORY SUBROUTINES ########
