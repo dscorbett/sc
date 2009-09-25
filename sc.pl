@@ -20,18 +20,20 @@
 # (I don't see the point of copying the full GPL text so if you really care go look it up.)
 
 # Based on sc5.pl, with:
-# nothing new yet
+# environments
+# more efficient rule parsing
+# line numbers instead of rule numbers in warnings
 
 # TODO:
-# nonsuffixed backreferences [current]
-# fix -o [unknown]
-# environments [current]
-# more efficient rule parsing [almost done]
-# overwrite warnings [easy]
-# line numbers instead of rule numbers in warnings [partially done]
-# display mode use in warnings [easy]
+# fix -o
+# line numbers in all warnings
+# overwrite warnings
+# display mode use in warnings
 # % and ~ in mismatch warnings
-# get rid of "s:" in suffix warnings [clean-up]
+# get rid of "s:" in suffix warnings
+# delete unnecessary comments
+# consistent syntax label
+# $old[n] > %n in internal representation
 
 ######## SET-UP ########
 
@@ -412,6 +414,7 @@ sub parseFields {
 
 ######## VARIABLES ########
 
+my $premature = 0;
 my %cats;
 my @tentAbsAnte;
 my @absAnte;
@@ -534,44 +537,55 @@ sub rules {
         warn "Malformed ENV in line $lineNum\n";
         next RULE;
       }
-#say join ",", @avant;
-#say join ",", @apres;
-#say join ",", @ante;
-#say join ",", @post;
       
       @tentAbsAnte = parse (1, @ante);
       @tentAbsAvant = parse (2, @avant);
       @tentAbsPost = parse (3, @post);
       @tentAbsApres = parse (4, @apres);
       
-#say "ta1: $#tentAbsAnte";
-#say "ta2: $#tentAbsAvant";
-#say "ta3: $#tentAbsPost";
-#say "ta4: $#tentAbsApres";
-
-#foreach (0 .. $#tentAbsAnte) {
-#  my @tan = @{$tentAbsAnte[$_]};
-#  say "tan: ", join ",", @tan;
-#}
-#foreach (0 .. $#tentAbsAvant) {
-#  my @tav = @{$tentAbsAvant[$_]};
-#  say "tav: ", join ",", @tav;
-#}
-#foreach (0 .. $#tentAbsPost) {
-#  my @tpo = @{$tentAbsPost[$_]};
-#  say "tpo: ", join ",", @tpo;
-#}
-#foreach (0 .. $#tentAbsApres) {
-#  my @tap = @{$tentAbsApres[$_]};
-#  say "tap: ", join ",", @tap;
-#}
-#say "";
+foreach (0 .. $#tentAbsAnte) {
+  my @tan = @{$tentAbsAnte[$_]};
+  say "tan: ", join ",", @tan;
+}
+foreach (0 .. $#tentAbsAvant) {
+  my @tav = @{$tentAbsAvant[$_]};
+  say "tav: ", join ",", @tav;
+}
+foreach (0 .. $#tentAbsPost) {
+  my @tpo = @{$tentAbsPost[$_]};
+  say "tpo: ", join ",", @tpo;
+}
+foreach (0 .. $#tentAbsApres) {
+  my @tap = @{$tentAbsApres[$_]};
+  say "tap: ", join ",", @tap;
+}
+say "";
       
-      next RULE unless ($#tentAbsAnte + 1 || $#tentAbsAvant + 1 || $#tentAbsPost + 1);
+      next RULE if ($premature);
+      $premature = 0;
       push @absAnte, [@tentAbsAnte];
       push @absAvant, [@tentAbsAvant];
       push @absPost, [@tentAbsPost];
       push @absApres, [@tentAbsApres];
+      
+#foreach (0 .. $#absAnte) {
+#  my @tan = @{$absAnte[$_]};
+#  say "aav: ", join ",", @tan;
+#}
+#foreach (0 .. $#absAvant) {
+#  my @tav = @{$absAvant[$_]};
+#  say "aav: ", join ",", @tav;
+#}
+#foreach (0 .. $#absPost) {
+#  my @tpo = @{$absPost[$_]};
+#  say "apo: ", join ",", @tpo;
+#}
+#foreach (0 .. $#absApres) {
+#  my @tap = @{$absApres[$_]};
+#  say "aap: ", join ",", @tap;
+#}
+#say "";
+      
       $persist .= $tentPersist;
       $repeat .= $tentRepeat;
       push @dialects, $tentDialects;
@@ -684,11 +698,13 @@ sub parse {
         } else {
           warn "s:Backreference to empty PRE found in line $lineNum\n";
         }
+        $premature = 1;
         return;
       }
       if ($suffix == 0) {
         warn "Meaningless backreference %0 found in line $lineNum (indexes start at 1)\n";
         return;
+        $premature = 1;
       }
     }
     if ($parseMode >= 2 && /\$0*(\d+)$/) {
@@ -702,10 +718,12 @@ sub parse {
         } else {
           warn "s:Backreference to empty BEFORE found in line $lineNum\n";
         }
+        $premature = 1;
         return;
       }
       if ($suffix == 0) {
         warn "Meaningless backreference \$0 found in line $lineNum (indexes start at 1)\n";
+        $premature = 1;
         return;
       }
     }
@@ -720,10 +738,12 @@ sub parse {
         } else {
           warn "s:Backreference to empty POST found in line $lineNum\n";
         }
+        $premature = 1;
         return;
       }
       if ($suffix == 0) {
         warn "Meaningless backreference ~0 found in line $lineNum (indexes start at 1)\n";
+        $premature = 1;
         return;
       }
     }
@@ -739,16 +759,19 @@ sub parse {
     if ($suffix != -1) {
       if ($complement ne "") {
         warn "Backreference and complement found together in line $lineNum\n";
+        $premature = 1;
         return;
       }
       if ($min != 1 || $max != 1) {
         warn "Backreference and quantifier found together in line $lineNum\n";
+        $premature = 1;
         return;
       }
     }
     
     $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
     $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\)/\\$1/;
+    $_ =~ s/#/\\b/g; # change # to \b                    # A shoe in the works, this is.
     
     # THE MAIN PART OF THE REGEX
     $_ =~ s/>\|</>+</g; # change | to + between categories
@@ -802,59 +825,23 @@ sub parse {
             $quarks[$q] = catContents ($1);
           } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
             if ($1 eq "%") {
-#              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
-#                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
-#                  warn "Backreference in the first index of PRE found in line $lineNum\n";
-#                } else {
-#                  warn "Backreference value greater than %$2 found in line $lineNum\n";
-#                }
-#                return;
-#              } elsif ($2 == 0) {
-#                warn "Meaningless backereference %0 found in line $lineNum\n";
-#                return;
-#              } else {
-                if (1 || $parseMode == 4) {
-                  $quarks[$q] = "\$old[" . ($2 - 1) . "]";
-                } else {
-                  $quarks[$q] = "\\$2";
-                }
-#              }
+              if (1 || $parseMode == 4) {
+                $quarks[$q] = "\$old[" . ($2 - 1) . "]";
+              } else {
+                $quarks[$q] = "\\$2";
+              }
             } elsif ($1 eq "\$" && $parseMode >= 2) {
-#              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
-#                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
-#                  warn "Backreference in the first index of BEFORE found in line $lineNum\n";
-#                } else {
-#                  warn "Backreference value greater than \$$2 found in line $lineNum\n";
-#                }
-#                return;
-#              } elsif ($2 == 0) {
-#                warn "Meaningless backereference \$0 found in line $lineNum\n";
-#                return;
-#              } else {
-                if (1 || $parseMode == 4) {
-                  $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + 0) . "]";
-                } else {
-                  $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + 1);
-                }
-#              }
+              if (1 || $parseMode == 4) {
+                $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + 0) . "]";
+              } else {
+                $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + 1);
+              }
             } elsif ($1 eq "~" && $parseMode >= 3) {
-#              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
-#                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
-#                  warn "Backreference in the first index of POST found in line $lineNum\n";
-#                } else {
-#                  warn "Backreference value greater than ~$2 found in line $lineNum\n";
-#                }
-#                return;
-#              } elsif ($2 == 0) {
-#                warn "Meaningless backereference ~0 found in line $lineNum\n";
-#                return;
-#              } else {
-                if (1 || $parseMode == 4) {
-                  $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 1) . "]";
-                } else {
-                  $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 2);
-                }
-#              }
+              if (1 || $parseMode == 4) {
+                $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 1) . "]";
+              } else {
+                $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 2);
+              }
             }
           }
         }
@@ -939,9 +926,11 @@ sub parse {
                 } else {
                   warn "Backreference value greater than %$2 found in line $lineNum\n";
                 }
+                $premature = 1;
                 return;
               } elsif ($2 == 0) {
                 warn "Meaningless backereference %0 found in line $lineNum\n";
+                $premature = 1;
                 return;
               } else {
                 if ($parseMode == 4) {
@@ -957,9 +946,11 @@ sub parse {
                 } else {
                   warn "Backreference value greater than \$$2 found in line $lineNum\n";
                 }
+                $premature = 1;
                 return;
               } elsif ($2 == 0) {
                 warn "Meaningless backereference \$0 found in line $lineNum\n";
+                $premature = 1;
                 return;
               } else {
                 if ($parseMode == 4) {
@@ -975,9 +966,11 @@ sub parse {
                 } else {
                   warn "Backreference value greater than ~$2 found in line $lineNum\n";
                 }
+                $premature = 1;
                 return;
               } elsif ($2 == 0) {
                 warn "Meaningless backereference ~0 found in line $lineNum\n";
+                $premature = 1;
                 return;
               } else {
                 if ($parseMode == 4) {
@@ -1046,29 +1039,34 @@ sub parse {
     $oldPositive =~ s/\\(\d+)/\$old[$1]/g;
     if ($oldPositive =~ /^\(\?!/) {
       warn "Backreference to a complement found in line $lineNum\n";
+      $premature = 1;
       return;
     }
     
     if ($positive eq "") {
       if ($suffix == -1 && $parseMode == 4) {
         warn "Useless empty string in the AFTER of line $lineNum\n";
+        $premature = 1;
         return;
       } else {
-        $positive = $oldPositive;say "pos = $positive";
+        $positive = $oldPositive;
       }
     } elsif (($positive =~ tr/\|//) > 0) {
       if ($suffix == -1 && $parseMode == 4) {
         warn "Backreference needed for <$positive> in the AFTER of line $lineNum\n";
+        $premature = 1;
         return;
       }
     }
 #say (($positive =~ tr/\|//), " -$positive-$oldPositive- ", ($oldPositive =~ tr/\|//));
     if (($positive =~ tr/\|//) < ($oldPositive =~ tr/\|//)) {
       warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " < ", ($oldPositive =~ tr/\|//) + 1, ")\n";
+      $premature = 1;
       return; # don't do "$"
     }
     if ($exact && ($positive =~ tr/\|//) != ($oldPositive =~ tr/\|//)) {
       warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " != ", ($oldPositive =~ tr/\|//) + 1, ")\n";
+      $premature = 1;
       return if ($exact == 2); # don't do "$"
     }
 #say "POSITIVE: $positive";
@@ -1086,9 +1084,6 @@ sub parse {
 }
 
 ######## WORDS ########
-
-my @old;
-my @new;
 
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
@@ -1118,11 +1113,11 @@ foreach my $dial (split //, $dialect) {
       next SC if ($persist =~ /,$sc,/);
       next SC unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial));
       
-      @index = regindex ($wordCopy, $sc); # not working
-say "ind: ", join ",", @index;
+      @index = regindex ($wordCopy, $sc);
+#say "ind: ", join ",", @index;
       my $offset = 0;
       while (@index > 0) {
-        ($wordCopy, $offset) = replace ($sc, $wordCopy, $offset, shift @index, shift @index);
+        ($wordCopy, $offset) = replace ($sc, $wordCopy, $offset, shift @index, shift @index, shift @index);
       }
       $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
       $limit--;
@@ -1163,27 +1158,27 @@ say "ind: ", join ",", @index;
 #              -> $oldIndiv[2][1]: u
 # (given f h? o|u+ with word <foub>)
 
-sub regindex {
-say "";
+sub regindex { # problems with WBs
   my $word = shift;
   die "\nError: Long word\n" if (length $word > 32766);
   my $scNum = shift;
   my $regex = "";
   my @before = (@{$absAnte[$scNum]}, @{$absAvant[$scNum]}, @{$absPost[$scNum]});
-  
-#foreach (0 .. $#before) { my @ante2 = @{$before[$_]}; say "before: ", join ",", @ante2; }
-  
+  my @ret;
   my $greatestIndex = 0;
-  for (my $i = 0; $i < length $word; $i++) {
+  
+  POSITION: for (my $i = 0; $i < length $word; $i++) {
     my @old;
     my @oldIndiv;
+    my $allOlds = "";
+    my $lastGreatestIndex = $greatestIndex;
     foreach (0 .. $#before) {
       my @before2 = @{$before[$_]};
       (my $old, my $min, my $max, my $new, my $suffix, my $greed) = @before2[0 .. 5];
       if ($suffix == -1) {
         $regex = $new;
       } else {
-        my @oldMatches = $old[$suffix];
+        my @oldMatches = @{$oldIndiv[$suffix - 1]};
         my @oldChoices = split /\|/, $old;
         foreach my $oldMatch (@oldMatches) {
           my $choiceIndex = -1;
@@ -1199,22 +1194,23 @@ say "";
       }
       $regex = "($regex" . "){$min,$max}$greed";
       
-say "$word =~ /(?:^$allOlds)$regex/";
-      if ($word =~ /(?:^.{$i}$allOlds)$regex/) {
-#say "$& is made of {$min to $max} <$new>s. We must figure out how many of which!";
-        
+#say "$word ?~ /(?:^.{$i}$allOlds)($regex)/";
+      if ($word =~ /(?:^.{$i}$allOlds)($regex)/) {
+        $greatestIndex = length $& if ($greatestIndex < length $&);
         my $matched = "";
-        my $unit = $&;
+        my $unit = $1;
+        $unit = "\\b" if ($unit eq "");
+#say "$unit is made of {$min to $max} <$new>s. We must figure out how many of which!";
         my @units;
         my @blacklist;
         
         BLACKLIST: while (1) {
-#say "$min~$max*$unit";
-          for (my $i = 0; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
-            my $lookFor = blacken ($new, $blacklist[$i - 0]);
-#say "look for $lookFor";
+          for (my $i = 1; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
+            my $lookFor = blacken ($new, $blacklist[$i]);
+#say "look for \"$lookFor\" in <$unit>";
             $unit =~ s/($lookFor)$//;
             $matched = $1;
+#say "matched: $matched";
             unshift @units, $matched;
           }
           
@@ -1224,61 +1220,33 @@ say "$word =~ /(?:^$allOlds)$regex/";
           } else {
             last BLACKLIST;
           }
-        } # BLACKLIST
-        say "units: ", join ",", @units;
-        push @old, [@units];
+        }
+#say "units: ", join ",", @units;
+        push @old, join "", @units;
+        push @oldIndiv, [@units];
+#say "old:   ", join ",", @old;
+        $allOlds = join "", @old;
+#say "all:   $allOlds";
+      } else {
+        next POSITION;
       } # =~
-      
-    } # @before
-  } # length $word
-
-foreach (0 .. $#old) { my @old2 = @{$old[$_]}; say "old: ", join ",", @old2; }
+    }
+    push @ret, $i, length $allOlds, [@oldIndiv] if ($greatestIndex > $lastGreatestIndex);
+  }
+  return @ret;
 }
 
 sub blacken {
-  my $white = shift;
-  my $black = shift;
-  $black = "" unless (defined $black);
-  $white =~ s/$black//g;
-  $white =~ s/^\|//;
-  return $white;
-}
-
-sub regindex2 {
-  my $word = shift;
-  my $scNum = shift;
-  my $regex;
-  my @avant = @{$absAvant[$scNum]}; # dinnae work 'case there's a new format the nou
-  foreach (0 .. $#avant) {
-    $regex .= "($avant[$_])";
-  }
-  
-  my @ret;
-  my @ref = ();
-  my $greatestIndex = 0;
-  for (my $i = 0; $i < length $word; $i++) {
-    die "\nError: Long word\n" if ($i > 32766);
-    if ($word =~ /(?:^.{$i})$regex/) {
-      if ($greatestIndex < length $&) {
-        push @ret, $i, length ($&) - $i;
-        $greatestIndex = length $&;
-      } else {
-        next;
-      }
-      my $ref = 1;
-      my @tmpRef = ();
-      while (1) {
-        my $tmp = $#tmpRef;
-        eval "push \@tmpRef, \$$ref if (defined \$$ref)";
-        last if ($#tmpRef == $tmp);
-        $ref += 2;
-      }
-      unshift @tmpRef, ($ref - 1) / 2;
-      push @ref, @tmpRef;
+  my @white = split /\|/, shift;
+  my @black;
+  @black = split (/\|/, shift) if (defined $_[0]);
+  foreach my $white (0 .. $#white) {
+    foreach my $black (0 .. $#black) {
+      splice @white, $white, 1 if (defined $white[$white] && defined $black[$black] && $white[$white] eq $black[$black]);
     }
   }
-  @old = @ref;
-  return @ret;
+  my $white = join "|", @white;
+  return $white;
 }
 
 sub replace {
@@ -1287,58 +1255,47 @@ sub replace {
   my $os = shift;
   my $pos = $os + shift;
   my $len = shift;
+  my @oldIndiv = shift;
+  @oldIndiv = @{$oldIndiv[0]};
+  my @old;
+  foreach (@oldIndiv) {
+    push @old, join "", @{$_};
+  }
   my @apres = @{$absApres[$scNum]};
   my $pre = substr ($word, 0, $pos);
   my $post = substr ($word, $pos);
-  my @avant = (0);
-  my $oldShift = shift @old;
-  push @avant, shift @old foreach (1 .. $oldShift);
+  my @after;
   
-  my $apres;	
   foreach (0 .. $#apres) {
-    (my $old, my $min, my $max, my $new, my $suffix) = @{$apres[$_]}[0 .. 4];
+    my @apres2 = @{$apres[$_]};
+    (my $old, my $min, my $max, my $new, my $suffix, my $greed) = @apres2[0 .. 5];
     if ($suffix == -1) {
-      $apres .= $new;
+      push @after, $new;
     } else {
-      $old =~ s/\$old\[(\d+)\]/$avant[$1]/g;
-      $new =~ s/\$old\[(\d+)\]/$avant[$1]/g;
-      my $unit = $avant[$suffix];
-      my $matched;
-      my @units;
-      my @blacklist = ();
-      for (my $i = 0; ($max eq "" || $max > $i) && length $unit >= 1; $i++) {
-        my $lookFor = blacken ($old, $blacklist[$i]);
-        $unit =~ s/($lookFor)$//;
-        $matched = $1;
-        unshift @units, $matched;
-      }
-      if ($#units + 1 < $min || $max ne "" && $#units > $max) {
-        defined $units[-1] ? $blacklist[0] .= "|$units[-1]" : $blacklist[0] .= "";
-        for (my $i = 0; $blacklist[$i] eq "|$old"; $i++) {
-          push @blacklist, "" x $i - $#blacklist + 1 if ($i > $#blacklist);
-          $blacklist[$i] = "";
-          $blacklist[$i + 1] .= "|$units[-$i - 1]";
-        }
-        @units = ();
-      }
-      
-      my $index = -1;
-      foreach my $unit (@units) {
-        my @old = split /\|/, $old;
-        foreach (0 .. $#old) {
-          if ($unit eq $old[$_]) {
-            $index = $_;
+      my @oldMatches = @{$oldIndiv[$suffix - 1]};
+      my @oldChoices = split /\|/, $old;
+      my $toBeAdded = "";
+      foreach my $oldMatch (@oldMatches) {
+        foreach (0 .. $#oldChoices) {
+          if ($oldMatch eq $oldChoices[$_]) {
+            $toBeAdded .= (split /\|/, $new)[$_];
             last;
           }
         }
-        $apres .= ((split /\|/, $new), "")[$index]; # $index will never be -1
       }
+      push @after, $toBeAdded;
+    }
+  }
+  my $after = join "", @after;
+  for (my $i = 0; $i <= $#oldIndiv + 1; $i++) {
+    if ($i < scalar @{$absAnte[$scNum]}) {
+      $after = (join "", @{$oldIndiv[$i]}) . $after;
+    } elsif ($i > (scalar @{$absAnte[$scNum]}) + (scalar @{$absAvant[$scNum]})) {
+      $after .= join "", @{$oldIndiv[$i]};
     }
   }
   
-  die "\nError: Long word\n" if ($len > 32766);
-  
-  defined $apres ? eval "\$post =~ s/.\{$len\}/$apres/" : eval "\$post =~ s/.\{$len\}//";
+  defined $after ? eval "\$post =~ s/.\{$len\}/$after/" : eval "\$post =~ s/.\{$len\}//";
   $os += length ("$pre$post") - length ($word);
   return ("$pre$post", $os);
 }
