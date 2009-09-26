@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # Sound Changer
-# A phonological shift simulator, like Geoff Eddy's SCA and Zompist's sounds
+# A sound change simulator, like Geoff Eddy's SCA and Zompist's sounds
 
 # Copyright (C) 2009 David Corbett
 #
@@ -22,18 +22,13 @@
 # Based on sc5.pl, with:
 # environments
 # more efficient rule parsing
+# more intuitive complement parsing
 # line numbers instead of rule numbers in warnings
+# overwrite warnings
+# display modes in warnings
 
 # TODO:
-# fix -o
-# line numbers in all warnings
-# overwrite warnings
-# display mode use in warnings
-# % and ~ in mismatch warnings
-# get rid of "s:" in suffix warnings
-# delete unnecessary comments
-# consistent syntax label
-# $old[n] > %n in internal representation
+# repetition bugfix
 
 ######## SET-UP ########
 
@@ -313,6 +308,7 @@ my %html = (
 my %cond;
 my $reqDial = "";
 my $edit = 0;
+my $err = 0;
 my $fields = ",";
 my $colonThreshold = 0;
 my $html = 0;
@@ -332,10 +328,11 @@ foreach (@ARGV) {
   (/^-(?:c|cond)=(.+)$/i) ? parseCond (uc $1) :
   (/^-(?:d|dialects)=(.+)$/i) ? $reqDial = $1 :
   (/^-(?:e|edit)$/i) ? $edit = 1 :
+  (/^-(?:err)$/i) ? $err = 1 :
   (/^-(?:f|fields)$/i) ? parseFields (1) :
   (/^-(?:f|fields)=(.+)$/i) ? parseFields ($1) :
   (/^-(?:hl|hlevel)=(\d+)$/i) ? $colonThreshold = $1 :
-  (/^-(h|help)$/i) ? record ("SC © 2009 by David Corbett. For more information read readme_sc5.txt.\n\n") :
+  (/^-(h|help)$/i) ? record ("SC © 2009 by David Corbett. For more information read readme_sc6.txt.\n\n") :
   (/^-html$/i) ? $html = 1 :
   (/^-(?:l|limit)=(\d+)$/i) ? $limit = $maxLimit = $1 :
   (/^-(?:m|mode)=(\d+)$/i) ? $mode = $1 :
@@ -358,7 +355,9 @@ if ($limit == 0) {
 
 if (defined $output) {
   $output = "output_$rules" if ($output eq "");
-  open OUTPUT, ">$UTF8", "$output" or die "$output not accessible\n";
+  open OUTPUT, "<$UTF8", "$output" and promptOverwrite ();
+  close OUTPUT;
+  open OUTPUT, ">$UTF8", "$output" or die "$output is inaccessible\n";
   $output = *OUTPUT;
 }
 
@@ -397,12 +396,12 @@ sub parseFields {
     my @ranges = split "-";
     foreach (@ranges) {
       unless (/^\d+$/) {
-        warn "Non-digits in numeric range in -fields\n";
+        err ("Non-digits in numeric range in -fields\n");
         return;
       }
     }
     if ($#ranges != 0 && $ranges[0] >= $ranges[-1]) {
-      warn "Minimum not less than maximum in -fields range\n";
+      err ("Minimum not less than maximum in -fields range\n");
       return;
     }
     foreach ($ranges[0] .. $ranges[-1]) {
@@ -410,6 +409,18 @@ sub parseFields {
     }
   }
   $fields .= $ret;
+}
+
+sub promptOverwrite {
+  warn "$output already exists. Do you want to overwrite it? (Y/N)\n";
+  my $input = <STDIN>;
+  chomp $input if (defined $input);
+  chop $input if (defined $input);
+  if (defined $input && (uc $input eq "YES" || uc $input eq "Y")) {
+    warn "Overwriting $output\n";
+  } else {
+    die "Execution aborted\n";
+  }
 }
 
 ######## VARIABLES ########
@@ -449,11 +460,11 @@ sub rules {
   my $rules = shift;
   my $lvl = 1 + shift;
   
-  die "Error: Infinite recursion ($rules would include itself)\n" if (defined $include{"$rules"});
+  croak ("Error: Infinite recursion ($rules would include itself)\n") if (defined $include{"$rules"});
   $include{"$rules"} = $lvl;
   
   eval "open RULES$lvl, \"<$UTF8\", \"\$rules\" or die";
-  die "$rules not found ($lvl level(s) deep)\n" if (defined $@ && $@ ne "");
+  croak ("$rules not found ($lvl level(s) deep)\n") if (defined $@ && $@ ne "");
   my $rulesRef;
   eval "\$rulesRef = \\\*RULES$lvl";
   chomp (my @rulesRef = <$rulesRef>);
@@ -495,7 +506,6 @@ sub rules {
     }
     next if ($skip);
     
-   #if (/^(?:(?:\[(.*?)\]\s+)|)(.*?)\s+>(?:\s+(.*?))(?:\s+\/\s+(.*?))(?:\s+_\s+(.*?|))(?:(?:\s+\[(\S*?)\])|)$/) {
     if (/\s+>\s+/) {
       my @rule = split /\s+/, $_;
       if ($rule[0] =~ /\[(.*)\]/) {
@@ -530,11 +540,11 @@ sub rules {
       shift @rule;
       
       unless ($#avant + 1) {
-        warn "Empty BEFORE in line $lineNum\n";
+        err ("Empty BEFORE in line $lineNum\n");
         next RULE;
       }
       unless ($goodEnv || !$extantEnv) {
-        warn "Malformed ENV in line $lineNum\n";
+        err ("Malformed ENV in line $lineNum\n");
         next RULE;
       }
       
@@ -543,23 +553,22 @@ sub rules {
       @tentAbsPost = parse (3, @post);
       @tentAbsApres = parse (4, @apres);
       
-foreach (0 .. $#tentAbsAnte) {
-  my @tan = @{$tentAbsAnte[$_]};
-  say "tan: ", join ",", @tan;
-}
-foreach (0 .. $#tentAbsAvant) {
-  my @tav = @{$tentAbsAvant[$_]};
-  say "tav: ", join ",", @tav;
-}
-foreach (0 .. $#tentAbsPost) {
-  my @tpo = @{$tentAbsPost[$_]};
-  say "tpo: ", join ",", @tpo;
-}
-foreach (0 .. $#tentAbsApres) {
-  my @tap = @{$tentAbsApres[$_]};
-  say "tap: ", join ",", @tap;
-}
-say "";
+#foreach (0 .. $#tentAbsAnte) {
+#  my @tan = @{$tentAbsAnte[$_]};
+#  say "tan: ", join ",", @tan;
+#}
+#foreach (0 .. $#tentAbsAvant) {
+#  my @tav = @{$tentAbsAvant[$_]};
+#  say "tav: ", join ",", @tav;
+#}
+#foreach (0 .. $#tentAbsPost) {
+#  my @tpo = @{$tentAbsPost[$_]};
+#  say "tpo: ", join ",", @tpo;
+#}
+#foreach (0 .. $#tentAbsApres) {
+#  my @tap = @{$tentAbsApres[$_]};
+#  say "tap: ", join ",", @tap;
+#}
       
       next RULE if ($premature);
       $premature = 0;
@@ -567,24 +576,6 @@ say "";
       push @absAvant, [@tentAbsAvant];
       push @absPost, [@tentAbsPost];
       push @absApres, [@tentAbsApres];
-      
-#foreach (0 .. $#absAnte) {
-#  my @tan = @{$absAnte[$_]};
-#  say "aav: ", join ",", @tan;
-#}
-#foreach (0 .. $#absAvant) {
-#  my @tav = @{$absAvant[$_]};
-#  say "aav: ", join ",", @tav;
-#}
-#foreach (0 .. $#absPost) {
-#  my @tpo = @{$absPost[$_]};
-#  say "apo: ", join ",", @tpo;
-#}
-#foreach (0 .. $#absApres) {
-#  my @tap = @{$absApres[$_]};
-#  say "aap: ", join ",", @tap;
-#}
-#say "";
       
       $persist .= $tentPersist;
       $repeat .= $tentRepeat;
@@ -598,7 +589,7 @@ say "";
       parseCat ($cat, $contents);
     } elsif (/^(IMPORT|INCLUDE)\s+(.+)$/i) {
       eval "rules (escapeString (\"$2\"), $lvl) or die";
-      die "$@" if (defined $@ && $@ ne ""); # "$rules not found"
+      croak ("$@") if (defined $@ && $@ ne ""); # "$rules not found"
     } elsif (/^DIAL(ECTS)?\s+(\S*)$/i) {
       $dialect .= $2;
     } elsif (/^COND(ITIONS)?\s+(.*)/i) {
@@ -608,7 +599,7 @@ say "";
     } elsif (/^#(:*)(\s*)(.*)$/) {
       push @colon, $scNum, length $1, $3;
     } else {
-      warn "Unparsable statement \"$_\" on line $lineNum\n" unless ($skipping);
+      err ("Unparsable statement \"$_\" on line $lineNum\n") unless ($skipping);
     }
   }
   close $rulesRef;
@@ -623,7 +614,7 @@ say "";
 #  say "";
 #}
 #say "p:   [$persist]";
-#say "r:   [$repeat]";
+say "r:   [$repeat]";
 #say "d:   [$dialect]";
 #say "d:   ", join ",", @dialects;
 #say "dp:  ", join ",", @dialectsPersist;
@@ -643,8 +634,8 @@ sub parse {
     my $max = 1;
     unless ($parseMode == 4) {
       # COMPLEMENTS
-      $complement = "(?!" if (/^\^/);
-      $complement2 = ")" if (/^\^/);
+      $complement = "?!" if (/^\^/);
+      $complement2 = "" if (/^\^/);
       $_ =~ s/^\^//;
       
       # QUANTIFIERS AND GREED
@@ -681,6 +672,12 @@ sub parse {
         $min = $max;
         $max = $tmp;
       }
+      
+      if ($complement ne "" && !($min == 1 && defined $max && $max == 1)) {
+        err ("Complement and quantifier found together in line $lineNum\n");
+        $premature = 1;
+        return;
+      }
     }
     
     # SUFFICES
@@ -693,18 +690,18 @@ sub parse {
       $parseMode == 1 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsAnte);
       unless (($parseMode == 1 && defined $ret[$suffix - 1]) || defined $tentAbsAnte[$suffix - 1]) {
         if (($parseMode == 1 && $#ret + 1) || $#tentAbsAnte + 1) {
-          my $warnNum = $parseMode == 1 ? $#ret + 1 : $#tentAbsAnte + 1;
-          warn "s:Backreference value greater than %$warnNum found in line $lineNum\n";
+          my $errNum = $parseMode == 1 ? $#ret + 1 : $#tentAbsAnte + 1;
+          err ("Backreference value greater than %$errNum found in line $lineNum\n");
         } else {
-          warn "s:Backreference to empty PRE found in line $lineNum\n";
+          err ("Backreference to empty PRE found in line $lineNum\n");
         }
         $premature = 1;
         return;
       }
       if ($suffix == 0) {
-        warn "Meaningless backreference %0 found in line $lineNum (indexes start at 1)\n";
-        return;
+        err ("Meaningless backreference %0 found in line $lineNum (indexes start at 1)\n");
         $premature = 1;
+        return;
       }
     }
     if ($parseMode >= 2 && /\$0*(\d+)$/) {
@@ -713,16 +710,16 @@ sub parse {
       $parseMode == 2 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsAvant);
       unless (($parseMode == 2 && defined $ret[$suffix - 1]) || defined $tentAbsAvant[$suffix - 1]) {
         if (($parseMode == 2 && $#ret + 1) || $#tentAbsAvant + 1) {
-          my $warnNum = $parseMode == 2 ? $#ret + 1 : $#tentAbsAvant + 1;
-          warn "s:Backreference value greater than \$$warnNum found in line $lineNum\n";
+          my $errNum = $parseMode == 2 ? $#ret + 1 : $#tentAbsAvant + 1;
+          err ("Backreference value greater than \$$errNum found in line $lineNum\n");
         } else {
-          warn "s:Backreference to empty BEFORE found in line $lineNum\n";
+          err ("Backreference to empty BEFORE found in line $lineNum\n");
         }
         $premature = 1;
         return;
       }
       if ($suffix == 0) {
-        warn "Meaningless backreference \$0 found in line $lineNum (indexes start at 1)\n";
+        err ("Meaningless backreference \$0 found in line $lineNum (indexes start at 1)\n");
         $premature = 1;
         return;
       }
@@ -733,16 +730,16 @@ sub parse {
       $parseMode == 3 ? (@tempAbsFoo = @ret) : (@tempAbsFoo = @tentAbsPost);
       unless (($parseMode == 3 && defined $ret[$suffix - 1]) || defined $tentAbsPost[$suffix - 1]) {
         if (($parseMode == 3 && $#ret + 1) || $#tentAbsPost + 1) {
-          my $warnNum = $parseMode == 3 ? $#ret + 1 : $#tentAbsPost + 1;
-          warn "s:Backreference value greater than ~$warnNum found in line $lineNum\n";
+          my $errNum = $parseMode == 3 ? $#ret + 1 : $#tentAbsPost + 1;
+          err ("Backreference value greater than ~$errNum found in line $lineNum\n");
         } else {
-          warn "s:Backreference to empty POST found in line $lineNum\n";
+          err ("Backreference to empty POST found in line $lineNum\n");
         }
         $premature = 1;
         return;
       }
       if ($suffix == 0) {
-        warn "Meaningless backreference ~0 found in line $lineNum (indexes start at 1)\n";
+        err ("Meaningless backreference ~0 found in line $lineNum (indexes start at 1)\n");
         $premature = 1;
         return;
       }
@@ -758,20 +755,20 @@ sub parse {
     
     if ($suffix != -1) {
       if ($complement ne "") {
-        warn "Backreference and complement found together in line $lineNum\n";
+        err ("Backreference and complement found together in line $lineNum\n");
         $premature = 1;
         return;
       }
       if ($min != 1 || $max != 1) {
-        warn "Backreference and quantifier found together in line $lineNum\n";
+        err ("Backreference and quantifier found together in line $lineNum\n");
         $premature = 1;
         return;
       }
     }
     
     $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
-    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\)/\\$1/;
-    $_ =~ s/#/\\b/g; # change # to \b                    # A shoe in the works, this is.
+    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\|\$)/\\$1/;
+    $_ =~ s/#/\\b/g; # change # to \b
     
     # THE MAIN PART OF THE REGEX
     $_ =~ s/>\|</>+</g; # change | to + between categories
@@ -920,65 +917,65 @@ sub parse {
             $quarks[$q] = catContents ($1);
           } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
             if ($1 eq "%") {
-              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
-                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
-                  warn "Backreference in the first index of PRE found in line $lineNum\n";
-                } else {
-                  warn "Backreference value greater than %$2 found in line $lineNum\n";
-                }
-                $premature = 1;
-                return;
-              } elsif ($2 == 0) {
-                warn "Meaningless backereference %0 found in line $lineNum\n";
-                $premature = 1;
-                return;
-              } else {
+#              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
+#                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
+#                  err ("Backreference in the first index of PRE found in line $lineNum\n");
+#                } else {
+#                  err ("Backreference value greater than %$2 found in line $lineNum\n");
+#                }
+#                $premature = 1;
+#                return;
+#              } elsif ($2 == 0) {
+#                err ("Meaningless backereference %0 found in line $lineNum\n");
+#                $premature = 1;
+#                return;
+#              } else {
                 if ($parseMode == 4) {
                   $quarks[$q] = "\$old[$2]";
                 } else {
                   $quarks[$q] = "\\$2";
                 }
-              }
+#              }
             } elsif ($1 eq "\$" && $parseMode >= 2) {
-              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
-                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
-                  warn "Backreference in the first index of BEFORE found in line $lineNum\n";
-                } else {
-                  warn "Backreference value greater than \$$2 found in line $lineNum\n";
-                }
-                $premature = 1;
-                return;
-              } elsif ($2 == 0) {
-                warn "Meaningless backereference \$0 found in line $lineNum\n";
-                $premature = 1;
-                return;
-              } else {
+#              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
+#                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
+#                  err ("Backreference in the first index of BEFORE found in line $lineNum\n");
+#                } else {
+#                  err ("Backreference value greater than \$$2 found in line $lineNum\n");
+#                }
+#                $premature = 1;
+#                return;
+#              } elsif ($2 == 0) {
+#                err ("Meaningless backereference \$0 found in line $lineNum\n");
+#                $premature = 1;
+#                return;
+#              } else {
                 if ($parseMode == 4) {
                   $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
                 } else {
                   $quarks[$q] = "\\" . $2 + $#tentAbsAnte + 1;
                 }
-              }
+#              }
             } elsif ($1 eq "~" && $parseMode >= 3) {
-              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
-                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
-                  warn "Backreference in the first index of POST found in line $lineNum\n";
-                } else {
-                  warn "Backreference value greater than ~$2 found in line $lineNum\n";
-                }
-                $premature = 1;
-                return;
-              } elsif ($2 == 0) {
-                warn "Meaningless backereference ~0 found in line $lineNum\n";
-                $premature = 1;
-                return;
-              } else {
+#              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
+#                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
+#                  err ("Backreference in the first index of POST found in line $lineNum\n");
+#                } else {
+#                  err ("Backreference value greater than ~$2 found in line $lineNum\n");
+#                }
+#                $premature = 1;
+#                return;
+#              } elsif ($2 == 0) {
+#                err ("Meaningless backereference ~0 found in line $lineNum\n");
+#                $premature = 1;
+#                return;
+#              } else {
                 if ($parseMode == 4) {
                   $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
                 } else {
                   $quarks[$q] = "\\" . $2 + $#tentAbsAnte + $#tentAbsAvant + 2;
                 }
-              }
+#              }
             }
           }
         }
@@ -1038,14 +1035,14 @@ sub parse {
     }
     $oldPositive =~ s/\\(\d+)/\$old[$1]/g;
     if ($oldPositive =~ /^\(\?!/) {
-      warn "Backreference to a complement found in line $lineNum\n";
+      err ("Backreference to a complement found in line $lineNum\n");
       $premature = 1;
       return;
     }
     
     if ($positive eq "") {
       if ($suffix == -1 && $parseMode == 4) {
-        warn "Useless empty string in the AFTER of line $lineNum\n";
+        err ("Useless empty string in the AFTER of line $lineNum\n");
         $premature = 1;
         return;
       } else {
@@ -1053,31 +1050,26 @@ sub parse {
       }
     } elsif (($positive =~ tr/\|//) > 0) {
       if ($suffix == -1 && $parseMode == 4) {
-        warn "Backreference needed for <$positive> in the AFTER of line $lineNum\n";
+        err ("Backreference needed for <$positive> in the AFTER of line $lineNum\n");
         $premature = 1;
         return;
       }
     }
 #say (($positive =~ tr/\|//), " -$positive-$oldPositive- ", ($oldPositive =~ tr/\|//));
     if (($positive =~ tr/\|//) < ($oldPositive =~ tr/\|//)) {
-      warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " < ", ($oldPositive =~ tr/\|//) + 1, ")\n";
+      err ("Length mismatch for ", substr ($suffixType, (length $suffixType) - 1, 1), "$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " < ", ($oldPositive =~ tr/\|//) + 1, ")\n");
       $premature = 1;
-      return; # don't do "$"
+      return;
     }
     if ($exact && ($positive =~ tr/\|//) != ($oldPositive =~ tr/\|//)) {
-      warn "Length mismatch for \$$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " != ", ($oldPositive =~ tr/\|//) + 1, ")\n";
-      $premature = 1;
-      return if ($exact == 2); # don't do "$"
+      err ("Length mismatch for ", substr ($suffixType, (length $suffixType) - 1, 1), "$suffix found in line $lineNum (", ($positive =~ tr/\|//) + 1, " != ", ($oldPositive =~ tr/\|//) + 1, ")\n");
+      $premature = 1 if ($exact >= 2);
+      return if ($exact >= 2);
     }
 #say "POSITIVE: $positive";
     $suffix += $#tentAbsAnte + 1 if ($suffixType =~ /\$|~/);
     $suffix += $#tentAbsAvant + 1 if ($suffixType =~ /~/);
-    if (1 || $parseMode != 1) { # wasn't 1 || # was^2 == 4
-      push @ret, [$oldPositive, $min, $max, $positive, $suffix, $greed];
-#say "push [$oldPositive, $min, $max, $positive, $suffix]";
-    } else {
-      push @ret, "($complement$positive$complement2){$min,$max}$greed";
-    }
+    push @ret, [$oldPositive, $min, $max, $positive, $suffix, $greed, $complement, $complement2];
   }
 #say "ret: ", join ",", @ret;
   return @ret;
@@ -1114,16 +1106,16 @@ foreach my $dial (split //, $dialect) {
       next SC unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial));
       
       @index = regindex ($wordCopy, $sc);
-#say "ind: ", join ",", @index;
       my $offset = 0;
       while (@index > 0) {
         ($wordCopy, $offset) = replace ($sc, $wordCopy, $offset, shift @index, shift @index, shift @index);
       }
       $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
       $limit--;
-      die "\n\n\nError: Infinite repetition\n\n\n" if ($limit == 0);
+      croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
       
-      record (" [") if (length $persist > 1 && $mode >= 3);
+      my $bra = 0;
+      $old = $wordCopy;
       PSC: for (my $psc = 0; $psc <= $#absAvant; $psc++) {
         my $oldP = $wordCopy;
         next PSC unless ($persist =~ /,$psc,/);
@@ -1131,14 +1123,18 @@ foreach my $dial (split //, $dialect) {
         @index = regindex ($wordCopy, $psc);
         my $offset = 0;
         while (@index > 0) {
-          ($wordCopy, $offset) = replace ($psc, $wordCopy, $offset, shift @index, shift @index);
+          ($wordCopy, $offset) = replace ($psc, $wordCopy, $offset, shift @index, shift @index, shift @index);
+        }
+        if (!$bra && ($notAll == 0 || $wordCopy ne $old)) {
+          record (" [") if (length $persist > 1 && $mode >= 3);
+          $bra = 1;
         }
         $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
         $limit--;
-        die "\n\n\nError: Infinite repetition\n\n\n" if ($limit == 0);
+        croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
         $psc-- if ($repeat =~ /,$psc,/ && $wordCopy ne $oldP);
       } # PSC
-      record ("]") if (length $persist > 1 && $mode >= 3);
+      record ("]") if (length $persist > 1 && $mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
       
       $wordCopy = edit (" > ", $wordCopy) if ($mode == 2 && ($notAll == 0 || $wordCopy ne $old));
       $sc-- if ($repeat =~ /,$sc,/ && $wordCopy ne $old);
@@ -1158,9 +1154,9 @@ foreach my $dial (split //, $dialect) {
 #              -> $oldIndiv[2][1]: u
 # (given f h? o|u+ with word <foub>)
 
-sub regindex { # problems with WBs
+sub regindex {
   my $word = shift;
-  die "\nError: Long word\n" if (length $word > 32766);
+  croak ("\nError: Long word\n") if (length $word > 32766);
   my $scNum = shift;
   my $regex = "";
   my @before = (@{$absAnte[$scNum]}, @{$absAvant[$scNum]}, @{$absPost[$scNum]});
@@ -1174,7 +1170,7 @@ sub regindex { # problems with WBs
     my $lastGreatestIndex = $greatestIndex;
     foreach (0 .. $#before) {
       my @before2 = @{$before[$_]};
-      (my $old, my $min, my $max, my $new, my $suffix, my $greed) = @before2[0 .. 5];
+      (my $old, my $min, my $max, my $new, my $suffix, my $greed, my $complement, my $complement2) = @before2[0 .. 7];
       if ($suffix == -1) {
         $regex = $new;
       } else {
@@ -1182,35 +1178,33 @@ sub regindex { # problems with WBs
         my @oldChoices = split /\|/, $old;
         foreach my $oldMatch (@oldMatches) {
           my $choiceIndex = -1;
-          OLDCHOICES: foreach (0 .. $#oldChoices) {
+          OLDCHOICE: foreach (0 .. $#oldChoices) {
             if ($oldChoices[$_] eq $oldMatch) {
               $choiceIndex = $_;
-              last OLDCHOICES;
+              last OLDCHOICE;
             }
           }
           $regex = (split /\|/, $new)[$choiceIndex] . "|";
         }
         $regex =~ s/\|$//;
       }
-      $regex = "($regex" . "){$min,$max}$greed";
-      
-#say "$word ?~ /(?:^.{$i}$allOlds)($regex)/";
-      if ($word =~ /(?:^.{$i}$allOlds)($regex)/) {
+      $regex = "($regex)";
+      $regex .= "{$min,$max}$greed" if ($complement eq "");
+      my $wantMatch = $complement eq "" ? 1 : 0;
+      my $doesMatch = $word =~ /(?:^.{$i}$allOlds)($regex)/ ? 1 : 0;
+      if ($doesMatch && $wantMatch) {
         $greatestIndex = length $& if ($greatestIndex < length $&);
         my $matched = "";
         my $unit = $1;
         $unit = "\\b" if ($unit eq "");
-#say "$unit is made of {$min to $max} <$new>s. We must figure out how many of which!";
         my @units;
         my @blacklist;
         
         BLACKLIST: while (1) {
           for (my $i = 1; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
             my $lookFor = blacken ($new, $blacklist[$i]);
-#say "look for \"$lookFor\" in <$unit>";
             $unit =~ s/($lookFor)$//;
             $matched = $1;
-#say "matched: $matched";
             unshift @units, $matched;
           }
           
@@ -1221,20 +1215,30 @@ sub regindex { # problems with WBs
             last BLACKLIST;
           }
         }
-#say "units: ", join ",", @units;
+        @units = () unless ($complement eq "");
         push @old, join "", @units;
         push @oldIndiv, [@units];
-#say "old:   ", join ",", @old;
         $allOlds = join "", @old;
-#say "all:   $allOlds";
-      } else {
+      } elsif (!$doesMatch && $wantMatch) {
         next POSITION;
-      } # =~
+      } elsif ($doesMatch && !$wantMatch) {
+        $i += (length $&) - $i;
+        next POSITION;
+      } elsif (!$doesMatch && !$wantMatch) {
+        push @old, "";
+        push @oldIndiv, [""];
+      }
     }
     push @ret, $i, length $allOlds, [@oldIndiv] if ($greatestIndex > $lastGreatestIndex);
   }
   return @ret;
 }
+
+# MATCH  WANT?  RESULT
+#   Y      Y    saves what was matched in various places
+#   -      Y    tries at the next character
+#   Y      -    increments the position counter by the length of what was matched
+#   -      -    saves blanks in various places
 
 sub blacken {
   my @white = split /\|/, shift;
@@ -1268,7 +1272,7 @@ sub replace {
   
   foreach (0 .. $#apres) {
     my @apres2 = @{$apres[$_]};
-    (my $old, my $min, my $max, my $new, my $suffix, my $greed) = @apres2[0 .. 5];
+    (my $old, my $min, my $max, my $new, my $suffix, my $greed, my $complement, my $complement2) = @apres2[0 .. 7];
     if ($suffix == -1) {
       push @after, $new;
     } else {
@@ -1291,7 +1295,7 @@ sub replace {
     if ($i < scalar @{$absAnte[$scNum]}) {
       $after = (join "", @{$oldIndiv[$i]}) . $after;
     } elsif ($i > (scalar @{$absAnte[$scNum]}) + (scalar @{$absAvant[$scNum]})) {
-      $after .= join "", @{$oldIndiv[$i]};
+      $after .= join "", @{$oldIndiv[$i - 1]};
     }
   }
   
@@ -1304,9 +1308,9 @@ sub replace {
 
 sub parseCat {
   my $cat = shift;
-  warn "Overwriting <$cat>\n" if (exists $cats{$cat});
+  err ("Overwriting <$cat> in line $lineNum\n") if (exists $cats{$cat});
   if($cat =~ /(\s|\+|-|<|>|\|)/) {
-    warn "Illegal character in <$cat>'s name: \"$1\"\n";
+    err ("Illegal character in <$cat>'s name: \"$1\"\n");
     return;
   }
   my $contents = shift;
@@ -1356,7 +1360,7 @@ sub parseCat {
     push @$tmp, split /\|/, $part;
   }
   if ($#$tmp == -1) {
-    warn "Useless empty category <$cat>\n";
+    err ("Useless empty category <$cat> in line $lineNum\n");
     return;
   }
   $cats{$cat} = $tmp;
@@ -1366,7 +1370,7 @@ sub catContents {
   my $name = shift;
   my @fish;
   unless (exists $cats{$name}) {
-    warn "Uninitialized category: <$name>\n";
+    err ("Uninitialized category <$name> in line $lineNum\n");
     return "";
   }
   foreach (0 .. $#{$cats{$name}}) {
@@ -1384,6 +1388,23 @@ sub trim {
   $string =~ s/>$/> /; # hack to make deletions possible
   $string =~ s/^>/ >/; # hack to make empty-avant warnings work
   return $string;
+}
+
+sub record {
+  my $str = shift;
+  print $output $str if (defined $output);
+  my @chars = split //, $str;
+  $str = "";
+  foreach (@chars) {
+    if ($nfkd) {
+      $str .= substr NFKD $_, 0, 1;
+    } elsif (defined $name{codepoint ($_)}) {
+      $str .= $name{codepoint ($_)};
+    } else {
+      $str .= $_;
+    }
+  }
+  $html || $unicode ? print STDOUT html ($str) : print $str;
 }
 
 sub edit {
@@ -1406,9 +1427,9 @@ sub edit {
   return $text;
 }
 
-sub record {
+sub err {
   my $str = shift;
-  print $output $str if (defined $output);
+  print $output $str if (defined $output && $err);
   my @chars = split //, $str;
   $str = "";
   foreach (@chars) {
@@ -1420,7 +1441,24 @@ sub record {
       $str .= $_;
     }
   }
-  $html || $unicode ? print STDOUT html ($str) : print $str;
+  $html || $unicode ? warn html ($str) : print $str;
+}
+
+sub croak {
+  my $str = shift;
+  print $output $str if (defined $output && $err);
+  my @chars = split //, $str;
+  $str = "";
+  foreach (@chars) {
+    if ($nfkd) {
+      $str .= substr NFKD $_, 0, 1;
+    } elsif (defined $name{codepoint ($_)}) {
+      $str .= $name{codepoint ($_)};
+    } else {
+      $str .= $_;
+    }
+  }
+  $html || $unicode ? die html ($str) : print $str;
 }
 
 sub html {

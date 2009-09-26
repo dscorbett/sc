@@ -1,16 +1,17 @@
 ABOUT SOUND CHANGER
-Sound Changer (SC) is a Perl program by David Corbett released under GPLv3. It applies sound change rules to a list of words. The concept is based on SCA, a Python program by Geoff Eddy. SC addresses some of SCA's issues, like the banana problem and the limited categories and mapping system.
+Sound Changer (SC) is a Perl program by David Corbett released under GPLv3. It applies sound change rules to a list of words. The concept is based on SCA, a Python program by Geoff Eddy. SC addresses some of SCA's issues, like the banana problem and the limited mapping system.
 
 ENCODING
 SC expects everything to be encoded in UTF-8. The command prompt can use any code page.
 
 RUNNING SC
-Type the following at the Windows command prompt: perl sc5.pl [arguments]
+Type the following at the Windows command prompt, after switching to the directory with SC in it: perl sc6.pl [arguments]
 
-The arguments are optional. As a shorthand, only the capitalized letters must be typed, so -sep is equivalent to -separator.
+The arguments are optional. Only the letters shown capitalized here must be typed, so -sep is equivalent to -separator. Case does not actually make a difference though.
 -Cond=[conditions]: Those conditions, separated by commas, are now true.
 -Dialects=[abc]: Only dialects a, b, and c will be displayed. If this argument is not set it displays all by default.
 -Edit: Editing mode.
+-ERR: Prints warning messages in the output file as well as on the screen.
 -Fields: Equivalent to -fields=1.
 -Fields=[range]: The range is numbers with commas and dashes, like 1,3-5. SC will only look at the 1st, 3rd, 4th, and 5th fields separated by the field separator (by default, the comma).
 -Help: Some basic help.
@@ -32,18 +33,18 @@ The arguments are optional. As a shorthand, only the capitalized letters must be
 Anything else is treated as a word.
 
 EDITING
-Editing mode lets you retype the word after each rule. This is useful if a rule did not work as planned or if you wish to change a word in unpredictable ways (like jezo > zo in Geoff's Slavic romlang). Pressing Enter will keep the word as it is, and Ctrl+Z will exit editing mode for the rest of the rules for that word.
+Editing mode lets you retype the word after each rule. This is useful if a rule did not work as planned or if you wish to change a word in unpredictable ways. Pressing Enter will keep the word as it is, and Ctrl+Z will exit editing mode for the rest of the rules for that word.
 
 FIELDS
 Normally, a words file is a list of words, one per line. But if there are multiple fields on a line (like the word and its translation) -fields can specify what to look for.
 
 If the following is a line in a words file
-foobar:masculine:object
+foobar:masculine:chair
 you would type -f=1 -sep=: since "foobar" is the first field and they are separated by colons.
 
 DISPLAY MODES
 There are three display modes which take care of command prompt mojibake.
-NFKD mode displays "é" as "e". It decomposes characters with NFKD and takes the base character. This does not work with combining diacritics.
+NFKD mode displays "é" as "e". It finds the base character with NFKD. This does not work with combining diacritics.
 HTML mode displays "é" as "&eacute;". There are 252 HTML code names, of which SC uses 246.
 Unicode mode displays "é" as "{LATIN SMALL LETTER E WITH ACUTE}".
 
@@ -129,21 +130,23 @@ cat3 = cat1        ! cat3 = c,a,t,1           (i.e. nothing special happens)
 cat4 = . qu zxx #  ! cat4 = .,qu,zxx,#        (. matches anything and # is the word boundary symbol)
 
 RULES
-Finally! The rules! Before was just setting up; this is where everything happens.
+Finally! The rules! Before was just the set-up; this is where everything happens.
 
 A rule is written thus:
-[DIALECTS] BEFORE > AFTER [FLAGS]
+[DIALECTS] BEFORE > AFTER / PRE _ POST [FLAGS]
 
-This means "For each of the DIALECTS, change BEFORE to AFTER, subject to the FLAGS."
+This means "For each of the DIALECTS, change BEFORE to AFTER when between PRE and POST, subject to the FLAGS."
+
+If " / PRE _ POST" is omitted it assumes PRE and POST are blank.
 
 DIALECTS is a string of letters or numbers specifying which dialects to apply the rule to. It must be written between brackets. Any character may be used as padding as long as it has not been previously defined as a dialect. Omitting the dialects means "all dialects".
 
-BEFORE is a string of strings separated by whitespace, each of which may be:
+BEFORE, PRE, and POST consist of strings separated by whitespace, each of which may be:
 A literal string;
 A backreference;
 A category reference.
 
-A backreference is in the form $[number] and means "whatever was matched for part [number]". "<vowel> <cons> $1" means "a consonant between two of the same vowel".
+A backreference consists of a symbol and a number. The symbols are %, $, and ~, which mean PRE, BEFORE, and POST respectively. Thus, %1 means "the first thing in PRE". ~5 means "the fifth thing in POST".
 
 Category references are very powerful. They are strings separated by +s and -s. Each of those pieces can be a category (<cat>) or a set of strings separated by pipes (a|b|c|d). Pieces not separated by a pipe represent any of the first followed by any of the second. The + strings are combined, and then anything in the - strings is taken out. Backreferences are allowed. Putting a caret at the beginning complements the whole thing.
 
@@ -163,23 +166,23 @@ v+w|x+y|z   = v,w,x,y,z
 x-x         = ERROR
 .|qu|zxx|#  = .,qu,zxx,#
 
-AFTER is similar to BEFORE; each string may be:
+AFTER is slightly different from the others; each string may be:
 A literal string;
 A backreference;
 A category reference with a backreference.
 
-Backreferences here refer back to the BEFORE. Category references are the same as in BEFORE (but for complements) but they must have a backreference as a suffix. This is what SCA calls mapping. "<vowel> n > <nasvow>$1" means "the string in <nasvow> at the same index as $1 in <vowel>".
+Category references are the same as in BEFORE, PRE, and POST (except without complements) but they must have a backreference as a suffix. This is what SCA calls mapping. "<vowel> > <nasvow>$1 / _ n" means "the string in <nasvow> at the same index as $1 in <vowel>".
 
-The first category must be no longer than the second category. If -exact=1, there is a warning if they are not the same length, and if -exact=2, the rule does not get accepted by the parser. This command line argument is provided because this feature can be useful, but it is also easy to do it by accident. It is up to the user to decide if it should be accepted or not.
+The first category must be no longer than the second category. If -exact=1, there is a warning if they are not the same length, and if -exact=2, the parser does not accept the rule. This command line argument is provided because this wobble feature can be useful, but it is also easy to do it by accident. It is up to the user to decide if it should be accepted or not.
 
-The only FLAGS are P and R. P makes the rule persistent; it will be applied after each nonpersistent rule. R repeats the rule until it stops matching. It is NOT necessary to use R to solve the banana problem. That is taken care of automatically. Therefore, Welsh-style lenition works as expected:
+The only FLAGS are P and R. P makes the rule persistent; it will be applied after each no npersistent rule. R repeats the rule until it stops matching. It is NOT necessary to use R to solve the banana problem. That is taken care of automatically. Therefore, Welsh-style lenition works as expected:
 unlen = p t k b d g
 len   = b d g v D G
 vowel = a e i o u
-<vowel> <unlen> <vowel> > $1 <len>$2 $3
+<unlen> > <len>$2 / <vowel> _ <vowel>
 
 QUANTIFIERS
-All of Perl's quantifiers work: *, +, ?, {}. ? for greed works too.
+All of Perl's quantifiers work: *, +, ?, {x}, and {x,y}. ? for greed works too.
 
 EXAMPLE RULES
 Conversion:
@@ -195,22 +198,22 @@ Metathesis:
 <vowel> <liquid> > $2 $1 ! foobar > foobra
 
 Epenthesis:
-<nasal> <liquid> > $1 <vstop>$1 $2 ! nr > ndr, ml > mbl
+> <vstop>%1 / <nasal> _ <liquid> ! nr > ndr, ml > mbl
 #|<cons>|<long>|<vowel> <cons> <glide> <vowel> > $1 $2 <high>$3 $3 $4
 
 Assimilation:
-<nasal> <vstop> > <nasal>$2 $2 ! md > nd
-<nasal> <vstop> > $2 $2 ! md > dd
+<nasal> > <nasal>~1 / _ <vstop> ! md > nd
+<vstop> > $1 $1 / <nasal> _ ! md > dd
 
 Simplification:
-<vowel> $1 > $1 ! foobar > fobar
-<vowel> $1 > $2 ! foobar > fobar
+%1 > $1 / <vowel> _ ! foobar > fobar
+%1 > %1 / <vowel> _ ! foobar > fobar (i.e. the same thing)
 
 Gemination:
-<vowel> <cons> <vowel> > $1 $2 $2 $3 ! foobar > foobbar
+<cons> > $1 $1 / <vowel> _ <vowel> ! foobar > foobbar
 
 Spellings:
-c|q|L|N|R|x|S|Z > ty|dy|ly|ny|ry|kh|sh|zh$1 ! Liotan respelling
+S|C|T|D|q|@ > sh|ch|th|dh|qu|a ! some common respellings
 
 COMPARISON BETWEEN SC AND SCA
 SCA                 | SC
@@ -218,7 +221,7 @@ Python              | Perl
 syntax highlighting | 
 CSV output          | plain output
 conciseness         | whitespace
-environment fields  | 
+environments        | environments
                     | no banana problem
                     | run-time editing
                     | multiple display styles
