@@ -1,0 +1,171 @@
+! An example rules file for Sound Changer
+! based on Geoff Eddy's Slavic romlang
+
+lwc = a b c d e f g h i j k l m n o p q r s t u v w x y z
+upc = A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+
+<upc> > <lwc>$1
+
+acute = í é á ó ú ý
+short = i e a o u y
+circ  = î ê â ô û ;
+grave = ì è à ò ù ;
+
+avow = a á â à ä
+evow = e é ê è ë
+ivow = i í î ì ï
+ovow = o ó ô ò ö
+uvow = u ú û ù ü
+
+front = <evow> <ivow> <ivow>
+back  = <avow> <uvow> <ovow>
+
+strong = i u
+weak   = I U
+
+vowel = <front> <back>
+
+labial = p b f v m
+dental = t d s z n l r
+velar  = k g x ; ;
+palalv = C Z S ; ;
+alv    = c z s ; ;
+pal    = T D X J N L R
+pal'   = ť ď ȟ ǰ ň ľ ř
+NAME ť t'
+NAME ď d'
+NAME ȟ x'
+NAME ǰ j'
+NAME ň n'
+NAME ľ l'
+NAME ř r'
+glide  = j w
+
+stop   = p b t d T D k g
+aff    = c q C Q
+fric   = f v s z S Z x
+nasal  = m n N
+liquid = l r L R
+
+obs    = <stop> <aff> <fric>
+cnotg  = <obs> <nasal> <liquid>
+cons   = <cnotg> <glide>
+soft   = <palalv> <pal> j
+
+!#############################################################################
+
+! Latin spellings
+
+<short> : > <acute>$1
+c > k
+qu > q
+gu <vowel> > G $2
+x > ks
+h > x
+
+e|i <vowel> > j $2
+o|u <vowel> > w $2
+e <ivow> > $2
+<vowel> e > $1 i
+
+!#############################################################################
+
+! Back vowel mergers
+
+<ovow> > <avow>$1
+! Geminates
+
+<cons> $1 > ; $2
+<short> ; > <acute>$1 ;
+; > 
+
+! Ruki
+
+r|u|ú|k|i|í s <vowel>|<liquid>|# > $1 x $3
+
+! First palatalisation
+
+<velar> <front> > <palalv>$1 $2
+s <palalv> > S $2   
+
+! Clusters
+
+kt > stj
+gn > nj
+
+! Post-jod fronting
+
+j <back> > j <front>$2
+
+! Diphthong reduction
+
+ai > ê
+ei > î
+au > û
+eu > jû
+
+! Unrounding of /u:/
+
+ú > ý
+
+! Jodation
+
+<velar> j > <palalv>$1
+<dental> j > <pal>$1
+<labial> j > $1 L
+<dental> <front> > <pal>$1 $2
+s <pal> > X $2
+s <soft> > S $2
+
+! Syllable opening
+
+<back> <nasal> <obs>+# > ä
+<front> <nasal> <obs>+# > ë
+!<cons>+ # > ! This messes things up and is Not Fun.
+<vowel> <liquid> <cons> > $2 $1 $3
+<stop> <obs> > $2
+
+! Prothetic consonants
+
+# <uvow>+ý > w $2
+# <front> > j $2
+#á > já
+w > v
+
+! Second and third pal
+
+<velar> ê > <alv>$1 ê
+<front> <velar> > $1 <alv>$2
+
+!#############################################################################
+
+! Vowel qualities
+
+<strong> > <weak>$1
+<weak> <cons>+ <weak> # > <strong>$1 $2 $3
+<weak> <cons>+ <weak> <cons>+ <vowel> > <strong>$1 $2 $3 $4 $5
+# <cons>+ <weak> # > $2 <strong>$3
+
+<short> <cons>+ <weak> > <grave>$1 $2 $3
+<weak> >
+a > o
+
+<circ> # > <short>$1
+<acute> # > <short>$1
+
+!#############################################################################
+
+! Spellings
+
+ch > č
+sh > S
+S > š
+Z > ž
+<pal> <back> > <pal'>$1 $2
+<pal> > <dental>$1
+<palalv> > $1 h
+<palalv> > <alv>$1
+x > h
+G > g
+
+!#############################################################################
