@@ -27,9 +27,6 @@
 # overwrite warnings
 # display modes in warnings
 
-# TODO:
-# repetition bugfix
-
 ######## SET-UP ########
 
 use charnames ();
@@ -517,10 +514,10 @@ sub rules {
       if ($rule[-1] =~ /\[(.*)\]/) {
         my $flags = $1;
         if ($flags =~ /P/i) {
-          $tentPersist .= "$scNum,";
+          $tentPersist = "$scNum,";
         }
         if ($flags =~ /R/i) {
-          $tentRepeat .= "$scNum,";
+          $tentRepeat = "$scNum,";
         }
         pop @rule;
       }
@@ -579,6 +576,8 @@ sub rules {
       
       $persist .= $tentPersist;
       $repeat .= $tentRepeat;
+      $tentPersist = "";
+      $tentRepeat = "";
       push @dialects, $tentDialects;
       push @dialectsPersist, $tentDialects unless ($tentPersist eq "");
       $scNum++;
@@ -614,7 +613,7 @@ sub rules {
 #  say "";
 #}
 #say "p:   [$persist]";
-say "r:   [$repeat]";
+#say "r:   [$repeat]";
 #say "d:   [$dialect]";
 #say "d:   ", join ",", @dialects;
 #say "dp:  ", join ",", @dialectsPersist;
@@ -641,7 +640,7 @@ sub parse {
       # QUANTIFIERS AND GREED
       if (/(?:(?!\\).)\*(\?|)$/) {
         $min = 0;
-        $max = "";
+        $max = 32766; # was $max = ""; but now the maximum is set. All code that checks for a blank $max is obsolete.
         $greed = "?" if ($1 eq "?");
       } elsif (/(?:(?!\\).)\+(\?|)$/) {
         $min = 1;
@@ -672,12 +671,16 @@ sub parse {
         $min = $max;
         $max = $tmp;
       }
-      
       if ($complement ne "" && !($min == 1 && defined $max && $max == 1)) {
         err ("Complement and quantifier found together in line $lineNum\n");
         $premature = 1;
         return;
       }
+    }
+    if ($max > 32766) {
+      err ("Maximum greater than 32766 in line $lineNum\n");
+      $premature = 1;
+      return;
     }
     
     # SUFFICES
@@ -917,65 +920,23 @@ sub parse {
             $quarks[$q] = catContents ($1);
           } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
             if ($1 eq "%") {
-#              if (($parseMode == 1 && $2 > $#ret + 1) || $2 > $#tentAbsAnte + 1) {
-#                if (($parseMode == 1 && $#ret == -1) || $#tentAbsAnte == -1) {
-#                  err ("Backreference in the first index of PRE found in line $lineNum\n");
-#                } else {
-#                  err ("Backreference value greater than %$2 found in line $lineNum\n");
-#                }
-#                $premature = 1;
-#                return;
-#              } elsif ($2 == 0) {
-#                err ("Meaningless backereference %0 found in line $lineNum\n");
-#                $premature = 1;
-#                return;
-#              } else {
-                if ($parseMode == 4) {
-                  $quarks[$q] = "\$old[$2]";
-                } else {
-                  $quarks[$q] = "\\$2";
-                }
-#              }
+              if ($parseMode == 4) {
+                $quarks[$q] = "\$old[$2]";
+              } else {
+                $quarks[$q] = "\\$2";
+              }
             } elsif ($1 eq "\$" && $parseMode >= 2) {
-#              if (($parseMode == 2 && $2 > $#ret + 1) || $2 > $#tentAbsAvant + 1) {
-#                if (($parseMode == 2 && $#ret == -1) || $#tentAbsAvant == -1) {
-#                  err ("Backreference in the first index of BEFORE found in line $lineNum\n");
-#                } else {
-#                  err ("Backreference value greater than \$$2 found in line $lineNum\n");
-#                }
-#                $premature = 1;
-#                return;
-#              } elsif ($2 == 0) {
-#                err ("Meaningless backereference \$0 found in line $lineNum\n");
-#                $premature = 1;
-#                return;
-#              } else {
-                if ($parseMode == 4) {
-                  $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
-                } else {
-                  $quarks[$q] = "\\" . $2 + $#tentAbsAnte + 1;
-                }
-#              }
+              if ($parseMode == 4) {
+                $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
+              } else {
+                $quarks[$q] = "\\" . $2 + $#tentAbsAnte + 1;
+              }
             } elsif ($1 eq "~" && $parseMode >= 3) {
-#              if (($parseMode == 3 && $2 > $#ret + 1) || $2 > $#tentAbsPost + 1) {
-#                if (($parseMode == 3 && $#ret == -1) || $#tentAbsPost == -1) {
-#                  err ("Backreference in the first index of POST found in line $lineNum\n");
-#                } else {
-#                  err ("Backreference value greater than ~$2 found in line $lineNum\n");
-#                }
-#                $premature = 1;
-#                return;
-#              } elsif ($2 == 0) {
-#                err ("Meaningless backereference ~0 found in line $lineNum\n");
-#                $premature = 1;
-#                return;
-#              } else {
-                if ($parseMode == 4) {
-                  $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
-                } else {
-                  $quarks[$q] = "\\" . $2 + $#tentAbsAnte + $#tentAbsAvant + 2;
-                }
-#              }
+              if ($parseMode == 4) {
+                $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
+              } else {
+                $quarks[$q] = "\\" . $2 + $#tentAbsAnte + $#tentAbsAvant + 2;
+              }
             }
           }
         }
@@ -1115,7 +1076,6 @@ foreach my $dial (split //, $dialect) {
       croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
       
       my $bra = 0;
-      $old = $wordCopy;
       PSC: for (my $psc = 0; $psc <= $#absAvant; $psc++) {
         my $oldP = $wordCopy;
         next PSC unless ($persist =~ /,$psc,/);
@@ -1192,10 +1152,12 @@ sub regindex {
       $regex .= "{$min,$max}$greed" if ($complement eq "");
       my $wantMatch = $complement eq "" ? 1 : 0;
       my $doesMatch = $word =~ /(?:^.{$i}$allOlds)($regex)/ ? 1 : 0;
+say "$word ?~ /(?:^.{$i}$allOlds)($regex)/";
       if ($doesMatch && $wantMatch) {
         $greatestIndex = length $& if ($greatestIndex < length $&);
         my $matched = "";
         my $unit = $1;
+say "unit: $unit";
         $unit = "\\b" if ($unit eq "");
         my @units;
         my @blacklist;
@@ -1203,8 +1165,11 @@ sub regindex {
         BLACKLIST: while (1) {
           for (my $i = 1; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
             my $lookFor = blacken ($new, $blacklist[$i]);
+say "lookFor: $lookFor";
             $unit =~ s/($lookFor)$//;
+say "nunit: $unit";
             $matched = $1;
+say "matched: $matched";
             unshift @units, $matched;
           }
           
@@ -1404,7 +1369,7 @@ sub record {
       $str .= $_;
     }
   }
-  $html || $unicode ? print STDOUT html ($str) : print $str;
+  $html || $unicode ? print STDOUT disp ($str) : print $str;
 }
 
 sub edit {
@@ -1441,7 +1406,7 @@ sub err {
       $str .= $_;
     }
   }
-  $html || $unicode ? warn html ($str) : print $str;
+  $html || $unicode ? warn disp ($str) : warn $str;
 }
 
 sub croak {
@@ -1458,10 +1423,10 @@ sub croak {
       $str .= $_;
     }
   }
-  $html || $unicode ? die html ($str) : print $str;
+  $html || $unicode ? die disp ($str) : die $str;
 }
 
-sub html {
+sub disp {
   my @chars = split //, $_[0];
   my $ret = "";
   foreach (@chars) {
