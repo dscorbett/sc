@@ -1,171 +1,325 @@
-! An example rules file for Sound Changer
-! based on Geoff Eddy's Slavic romlang
+!#############################################################################
+
+! This is a sample rules file to illustrate David Corbett's Sound Changer.
+! This file is based on Geoff Eddy's spanish.sc included with SCA 0.5.
+
+!#############################################################################
+
+! Change everything to lowercase.
 
 lwc = a b c d e f g h i j k l m n o p q r s t u v w x y z
 upc = A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
 
 <upc> > <lwc>$1
 
-acute = í é á ó ú ý
-short = i e a o u y
-circ  = î ê â ô û ;
-grave = ì è à ò ù ;
+! Define some classes of vowel phonemes.
 
-avow = a á â à ä
-evow = e é ê è ë
-ivow = i í î ì ï
-ovow = o ó ô ò ö
-uvow = u ú û ù ü
+vowel = i e E a O o u
+longv = í é É á Ó ó ú
+front = i e E
+back = u o O
+lomid = E O
+mid = e o
+high = i u
 
-front = <evow> <ivow> <ivow>
-back  = <avow> <uvow> <ovow>
+! Define some classes of consonant phonemes.
+! c C q are used for Old Spanish /ts tS dz/.
 
-strong = i u
-weak   = I U
-
-vowel = <front> <back>
-
-labial = p b f v m
-dental = t d s z n l r
-velar  = k g x ; ;
-palalv = C Z S ; ;
-alv    = c z s ; ;
-pal    = T D X J N L R
-pal'   = ť ď ȟ ǰ ň ľ ř
-NAME ť t'
-NAME ď d'
-NAME ȟ x'
-NAME ǰ j'
-NAME ň n'
-NAME ľ l'
-NAME ř r'
-glide  = j w
-
-stop   = p b t d T D k g
-aff    = c q C Q
-fric   = f v s z S Z x
+ustop  = p t k
+vstop  = b d g
+vfric  = B D G
+ufric  = f T x
+usib   = c s S
+vsib   = q z Z
 nasal  = m n N
-liquid = l r L R
+liquid = l r R
+glide  = j w
+alv    = t c C s d q z l n r
+lab    = p b v
+res    = l r n s
 
-obs    = <stop> <aff> <fric>
-cnotg  = <obs> <nasal> <liquid>
-cons   = <cnotg> <glide>
-soft   = <palalv> <pal> j
+! when one of these consonants is final, stress is normally on final syllable
+
+acons = b c d f g h j k l m p q r t v w x z B C D F G H J K L M P Q R T W X Z
+
+! These classes are combinations of others.
+
+fric  = <vfric> <ufric>
+uobs  = <ustop> <usib>
+vobs  = <vstop> <vsib>
+obs   = <uobs> <vobs>
+cons  = <obs> <nasal> <liquid> <fric> <glide>
+cnotl = <obs> <nasal> <fric>
 
 !#############################################################################
 
-! Latin spellings
+! First of all, convert Latin spelling to the phonemic representation.
 
-<short> : > <acute>$1
-c > k
-qu > q
-gu <vowel> > G $2
+c|q > k
 x > ks
-h > x
+y > i
+ph > f
 
-e|i <vowel> > j $2
-o|u <vowel> > w $2
-e <ivow> > $2
-<vowel> e > $1 i
+! Lose final /m/ and initial /h/.
 
-!#############################################################################
+m > / _ #
+h > / # _
 
-! Back vowel mergers
+! Reduction of diphthongs and creation of prevocalic glides.
 
-<ovow> > <avow>$1
-! Geminates
-
-<cons> $1 > ; $2
-<short> ; > <acute>$1 ;
-; > 
-
-! Ruki
-
-r|u|ú|k|i|í s <vowel>|<liquid>|# > $1 x $3
-
-! First palatalisation
-
-<velar> <front> > <palalv>$1 $2
-s <palalv> > S $2   
-
-! Clusters
-
-kt > stj
-gn > nj
-
-! Post-jod fronting
-
-j <back> > j <front>$2
-
-! Diphthong reduction
-
-ai > ê
-ei > î
-au > û
-eu > jû
-
-! Unrounding of /u:/
-
-ú > ý
-
-! Jodation
-
-<velar> j > <palalv>$1
-<dental> j > <pal>$1
-<labial> j > $1 L
-<dental> <front> > <pal>$1 $2
-s <pal> > X $2
-s <soft> > S $2
-
-! Syllable opening
-
-<back> <nasal> <obs>+# > ä
-<front> <nasal> <obs>+# > ë
-!<cons>+ # > ! This messes things up and is Not Fun.
-<vowel> <liquid> <cons> > $2 $1 $3
-<stop> <obs> > $2
-
-! Prothetic consonants
-
-# <uvow>+ý > w $2
-# <front> > j $2
-#á > já
-w > v
-
-! Second and third pal
-
-<velar> ê > <alv>$1 ê
-<front> <velar> > $1 <alv>$2
+ae > E:
+oe > e:
+au > o:
+<high> > <glide>$1 / _ <vowel>
+e > j / _ <vowel>
 
 !#############################################################################
 
-! Vowel qualities
+! Assign the stress, indicated with a preceding ';', to the correct
+! vowel. The antipenultimate is provisionally stressed; this stress is
+! removed if the penultimate should be stressed.
 
-<strong> > <weak>$1
-<weak> <cons>+ <weak> # > <strong>$1 $2 $3
-<weak> <cons>+ <weak> <cons>+ <vowel> > <strong>$1 $2 $3 $4 $5
-# <cons>+ <weak> # > $2 <strong>$3
+! added to account for words of two short syllables.  ASh 2003 May 24
 
-<short> <cons>+ <weak> > <grave>$1 $2 $3
-<weak> >
-a > o
+> ; / # <cons>* _ <vowel>
 
-<circ> # > <short>$1
-<acute> # > <short>$1
+> ; / _ <vowel> :? <cons>* <vowel> <cons>* <vowel> <cons>* #
+> ; / _ <vowel> : <cons>* <vowel>+ <cons>* #
+> ; / _ <vowel> <cons>{2,} <vowel>+ <cons>* #
+; > / _ .* ; [r]
+
+! Convert from 'a:' to 'á'.
+
+<vowel> > <longv>$1 / _ :
+: >
+
+! Vulgar Latin vowel changes 1: short vowels get lowered.
+
+i > é
+u > ó
+e > E
+o > O
+<longv> > <vowel>$1
+
+! Vulgar Latin vowel changes 2: /E O/ merge with /e o/.
+! The '@' is necessary to preserve the vowel when stressed;
+! this is a bit of a crock.
+
+;E > @
+E > e
+@ > ;E
+;O > @
+O > o
+@ > ;O
 
 !#############################################################################
 
-! Spellings
+! Merger of /b/ and /v/.
 
-ch > č
-sh > S
-S > š
-Z > ž
-<pal> <back> > <pal'>$1 $2
-<pal> > <dental>$1
-<palalv> > $1 h
-<palalv> > <alv>$1
-x > h
-G > g
+v > B
+b > B / <vowel> _ ;? <vowel>
+
+! Palatisation of velars before fromt vowels.
+
+sk > cc / _ ;? <front>+j
+kk > cc / _ ;? <front>+j
+k > c / _ ;? <front>+j
+g > J / _ ;? <front>+j
+j > / c+J _
+
+! Loss of intertonic vowels in various environments.
+! -- Too much? (Anton)
+
+<mid>|<high> > / ; <vowel> <res> _ <cons>+ <vowel>
+<mid>|<high> > / ; <vowel> <cons> _ <res> <vowel>
+<mid>|<high> > / <vowel> <res> _ <cons> ; <vowel>
+<mid>|<high> > / <vowel> <cons> _ <res> ; <vowel>
+
+! Syllable-final velars become /j/.
+
+k > j / . _ t|l|s
+g > j / . _ n|l
+
+! Simplification of various clusters:
+! pt ps rs ns mn mb > tt ss ss s nn mb
+
+p > t / _ t
+p > s / _ s
+r > s / _ s
+n > / _ s
+m > n / _ n
+n > m / _ b
+
+! More palatisations.
+
+ptj > cc
+ktj > cc
+skj > cc
+kkj > cc
+tj > c
+kj > c
+
+!#############################################################################
+
+! Raising and diphthongisation of some vowels.
+
+o > u / _ n? j
+<mid> > <high>$1 / _ <lab> j
+<mid> > <high>$1 / _ <cons> <cons> j
+<lomid> > <mid>$1 / _ <cons>+ j
+;E > j;e
+;O > w;e
+
+! A few more palatisations.
+
+jt > C
+js > S
+f > h / #|<vowel> _ <glide>? ;? <vowel>
+j > J / # _ ;? <vowel>
+
+lj > L
+n+j > N
+dj > JJ
+gj > JJ
+
+pj > jp / . _
+rj > jr / . _
+L > Z
+
+! Tense resonants.
+
+ll > L / <vowel> _ ;? <vowel>
+nn > N / <vowel> _ ;? <vowel>
+rr > R / <vowel> _ ;? <vowel>
+
+!#############################################################################
+
+! Lenition.
+
+<vstop> > <vfric>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+<vstop> > <vfric>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+<uobs> > <vobs>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+<uobs> > <vobs>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+J > / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+<obs> > / _ $1
+
+! Initial Cl > L
+
+pl > L / # _ ;? <vowel>
+kl > L / # _ ;? <vowel>
+fl > L / # _ ;? <vowel>
+
+! Loss of remaining intertonic vowels.
+! FIXME: too broad? (Anton)
+
+<mid>|<high> > / ; <vowel> <cons> _ <cons>+ <vowel>
+<mid>|<high> > / <vowel> <cons> _ <cons> ; <vowel>
+
+! Some glide changes.
+
+sj > js / <vowel> _
+aw > o
+ow > o
+aj > e
+ej > e
+ij > i
+
+! Final vowels.
+
+u > o / _ #
+i > e / _ #
+e > / <vowel> <alv> _ #
+
+! Some consonant cluster simplifications.
+
+mt|nt > nd
+nk > ng
+L > l / _ <cons>
+N > n / _ <cons>
+R > r / _ <cons>
+
+dn > n
+ct > q
+Dc > q
+ptm > m
+mm > m
+
+! note: ndc also > nc
+
+ndc > ng
+rdc > rc
+ntc > nc
+mpt > nt
+skp > sp
+spt > st
+stk > sk
+
+! note: these also > lm, ngl
+
+nm > rm
+ngn > ngr
+
+ndn > ndr
+mn > mbr
+
+tn > nd
+tl > ld
+nr > ndr
+ml > mbl
+
+<lab> > w / <vowel> _ <cons>
+w > / <back> _
+l > w / a _ q
+
+t|d > q / . _ <cnotl>
+
+b > u / _ d
+B > u / _ <obs>
+B > b
+
+! FIXME: just _d?
+
+!#############################################################################
+
+! Devoicing and separation of sibilants.
+
+J > j
+jj > j
+
+<vsib> > <usib>$1
+
+c > T
+S|Z > x
+
+! Spellings!
+! Much altered by Anton Sherwood, 2003 May 20
+
+T > z
+z > c / _ ;? <front>|j
+
+j > y
+L > ll
+R > rr
+N > ñ
+w > hw / #|<vowel> _ ;? <vowel>
+
+<vfric> > <vstop>$1
+k > qu / _ ;? <front>|y
+k > c
+C > ch
+
+x > j
+j > g / _ ;? <front>|y
+
+<vowel> > <longv>$1 / <vowel> .* ; _ n? s? #
+<vowel> > <longv>$1 / ; _ .* <vowel> .* <vowel>
+<vowel> > <longv>$1 / ; _ .* <vowel> <acons> #
+; >
+w > u
+y > hi / # _ e
+y > i / <cons> _
+y > i / _ <cons>
+
+> e / # _ s <cons>
 
 !#############################################################################

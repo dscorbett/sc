@@ -19,19 +19,15 @@
 
 # (I don't see the point of copying the full GPL text so if you really care go look it up.)
 
-# Based on sc5.pl, with:
-# environments
-# more efficient rule parsing
-# more intuitive complement parsing
-# line numbers instead of rule numbers in warnings
-# overwrite warnings
-# display modes in warnings
+# Based on sc6.pl, with:
+# absolute maximum of 32766, even for + and *
+# word boundary matching
 
 ######## SET-UP ########
 
 use charnames ();
 use encoding "UTF-8";
-use feature "say";
+#use feature "say";
 use strict;
 use utf8;
 use warnings;
@@ -522,7 +518,8 @@ sub rules {
         pop @rule;
       }
       my @avant;
-      push @avant, shift @rule while ($rule[0] ne ">");
+      shift @rule if ($rule[0] eq "");
+      push @avant, shift @rule while ($rule[0] ne ">" && $rule[0] ne "");
       shift @rule;
       my @apres;
       push @apres, shift @rule while (defined $rule[0] && $rule[0] ne "/");
@@ -536,8 +533,8 @@ sub rules {
       push @post, shift @rule while (defined $rule[0]);
       shift @rule;
       
-      unless ($#avant + 1) {
-        err ("Empty BEFORE in line $lineNum\n");
+      unless ($#ante + 1 || $#avant + 1 || $#post + 1) {
+        err ("No context for rule in line $lineNum\n");
         next RULE;
       }
       unless ($goodEnv || !$extantEnv) {
@@ -644,7 +641,7 @@ sub parse {
         $greed = "?" if ($1 eq "?");
       } elsif (/(?:(?!\\).)\+(\?|)$/) {
         $min = 1;
-        $max = "";
+        $max = 32766;
         $greed = "?" if ($1 eq "?");
       } elsif (/(?:(?!\\).)\{(.*)\}(\?|)$/) {
         $greed = "?" if ($2 eq "?");
@@ -653,7 +650,7 @@ sub parse {
           $max = $2;
         } elsif ($1 =~ /(\d+),/) {
           $min = $1;
-          $max = "";
+          $max = 32766;
         } elsif ($1 =~ /,(\d+)/) {
           $min = 0;
           $max = $1;
@@ -825,23 +822,11 @@ sub parse {
             $quarks[$q] = catContents ($1);
           } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
             if ($1 eq "%") {
-              if (1 || $parseMode == 4) {
-                $quarks[$q] = "\$old[" . ($2 - 1) . "]";
-              } else {
-                $quarks[$q] = "\\$2";
-              }
+              $quarks[$q] = "\$old[" . ($2 - 1) . "]";
             } elsif ($1 eq "\$" && $parseMode >= 2) {
-              if (1 || $parseMode == 4) {
-                $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + 0) . "]";
-              } else {
-                $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + 1);
-              }
+              $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + 0) . "]";
             } elsif ($1 eq "~" && $parseMode >= 3) {
-              if (1 || $parseMode == 4) {
-                $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 1) . "]";
-              } else {
-                $quarks[$q] = "\\" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 2);
-              }
+              $quarks[$q] = "\$old[" . ($2 + $#tentAbsAnte + $#tentAbsAvant + 1) . "]";
             }
           }
         }
@@ -920,23 +905,11 @@ sub parse {
             $quarks[$q] = catContents ($1);
           } elsif ($quarks[$q] =~ /^(%|\$|~)0*(\d+)$/) {
             if ($1 eq "%") {
-              if ($parseMode == 4) {
-                $quarks[$q] = "\$old[$2]";
-              } else {
-                $quarks[$q] = "\\$2";
-              }
+              $quarks[$q] = "\$old[$2]";
             } elsif ($1 eq "\$" && $parseMode >= 2) {
-              if ($parseMode == 4) {
-                $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
-              } else {
-                $quarks[$q] = "\\" . $2 + $#tentAbsAnte + 1;
-              }
+              $quarks[$q] = "\$old[$2 + $#tentAbsAnte + 1]";
             } elsif ($1 eq "~" && $parseMode >= 3) {
-              if ($parseMode == 4) {
-                $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
-              } else {
-                $quarks[$q] = "\\" . $2 + $#tentAbsAnte + $#tentAbsAvant + 2;
-              }
+              $quarks[$q] = "\$old[$2 + $#tentAbsAnte + $#tentAbsAvant + 2]";
             }
           }
         }
@@ -1131,6 +1104,7 @@ sub regindex {
     foreach (0 .. $#before) {
       my @before2 = @{$before[$_]};
       (my $old, my $min, my $max, my $new, my $suffix, my $greed, my $complement, my $complement2) = @before2[0 .. 7];
+#say "\n$old/$min/$max/$new/$suffix/$greed/$complement/$complement2";
       if ($suffix == -1) {
         $regex = $new;
       } else {
@@ -1152,24 +1126,19 @@ sub regindex {
       $regex .= "{$min,$max}$greed" if ($complement eq "");
       my $wantMatch = $complement eq "" ? 1 : 0;
       my $doesMatch = $word =~ /(?:^.{$i}$allOlds)($regex)/ ? 1 : 0;
-say "$word ?~ /(?:^.{$i}$allOlds)($regex)/";
       if ($doesMatch && $wantMatch) {
         $greatestIndex = length $& if ($greatestIndex < length $&);
         my $matched = "";
         my $unit = $1;
-say "unit: $unit";
-        $unit = "\\b" if ($unit eq "");
+        $unit = "#" if ($unit eq "");
         my @units;
         my @blacklist;
         
         BLACKLIST: while (1) {
           for (my $i = 1; ($max eq "" || $max >= $i) && length $unit >= 1; $i++) {
             my $lookFor = blacken ($new, $blacklist[$i]);
-say "lookFor: $lookFor";
             $unit =~ s/($lookFor)$//;
-say "nunit: $unit";
             $matched = $1;
-say "matched: $matched";
             unshift @units, $matched;
           }
           
@@ -1357,7 +1326,7 @@ sub trim {
 
 sub record {
   my $str = shift;
-  print $output $str if (defined $output);
+  print $output $str if (defined $output && $output ne "" );
   my @chars = split //, $str;
   $str = "";
   foreach (@chars) {
