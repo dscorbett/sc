@@ -5,42 +5,42 @@
 
 !#############################################################################
 
-! Change everything to lowercase.
+! Change everything to lowercase. Or not.
 
-lwc = a b c d e f g h i j k l m n o p q r s t u v w x y z
-upc = A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+!lwc = a b c d e f g h i j k l m n o p q r s t u v w x y z
+!upc = A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
 
-<upc> > <lwc>$1
+!<upc> > <lwc>$1
 
 ! Define some classes of vowel phonemes.
 
-vowel = i e E a O o u
-longv = í é É á Ó ó ú
-front = i e E
-back = u o O
-lomid = E O
+vowel = i e è a ò o u
+longv = í é ê á ô ó ú
+front = i e è
+back = u o ò
+lomid = è ò
 mid = e o
 high = i u
 
 ! Define some classes of consonant phonemes.
-! c C q are used for Old Spanish /ts tS dz/.
+! c ċ q are used for Old Spanish /ts tš dz/.
 
 ustop  = p t k
 vstop  = b d g
-vfric  = B D G
-ufric  = f T x
-usib   = c s S
-vsib   = q z Z
-nasal  = m n N
-liquid = l r R
+vfric  = ů ð ġ
+ufric  = f þ x
+usib   = c s š
+vsib   = q z ż
+nasal  = m n ñ
+liquid = l r ŕ
 glide  = j w
-alv    = t c C s d q z l n r
+alv    = t c ċ s d q z l n r
 lab    = p b v
 res    = l r n s
 
 ! when one of these consonants is final, stress is normally on final syllable
 
-acons = b c d f g h j k l m p q r t v w x z B C D F G H J K L M P Q R T W X Z
+acons = b c d f g h j k l m p q r t v w x z ů ċ ð ƒ ġ ĥ ĭ ç ł ŋ ü ć ŕ þ ŭ č ż
 
 ! These classes are combinations of others.
 
@@ -67,9 +67,9 @@ h > / # _
 
 ! Reduction of diphthongs and creation of prevocalic glides.
 
-ae > E:
-oe > e:
-au > o:
+ae > è~
+oe > e~
+au > o~
 <high> > <glide>$1 / _ <vowel>
 e > j / _ <vowel>
 
@@ -83,49 +83,49 @@ e > j / _ <vowel>
 
 > ; / # <cons>* _ <vowel>
 
-> ; / _ <vowel> :? <cons>* <vowel> <cons>* <vowel> <cons>* #
-> ; / _ <vowel> : <cons>* <vowel>+ <cons>* #
+> ; / _ <vowel> ~? <cons>* <vowel> <cons>* <vowel> <cons>* #
+> ; / _ <vowel> ~ <cons>* <vowel>+ <cons>* #
 > ; / _ <vowel> <cons>{2,} <vowel>+ <cons>* #
 ; > / _ .* ; [r]
 
-! Convert from 'a:' to 'á'.
+! Convert from 'a~' to 'á'.
 
-<vowel> > <longv>$1 / _ :
-: >
+<vowel> > <longv>$1 / _ ~
+~ >
 
 ! Vulgar Latin vowel changes 1: short vowels get lowered.
 
 i > é
 u > ó
-e > E
-o > O
+e > è
+o > ò
 <longv> > <vowel>$1
 
-! Vulgar Latin vowel changes 2: /E O/ merge with /e o/.
+! Vulgar Latin vowel changes 2: /è ò/ merge with /e o/.
 ! The '@' is necessary to preserve the vowel when stressed;
 ! this is a bit of a crock.
 
-;E > @
-E > e
-@ > ;E
-;O > @
-O > o
-@ > ;O
+;è > @
+è > e
+@ > ;è
+;ò > @
+ò > o
+@ > ;ò
 
 !#############################################################################
 
 ! Merger of /b/ and /v/.
 
-v > B
-b > B / <vowel> _ ;? <vowel>
+v > ů
+b > ů / <vowel> _ ;? <vowel>
 
 ! Palatisation of velars before fromt vowels.
 
 sk > cc / _ ;? <front>+j
 kk > cc / _ ;? <front>+j
 k > c / _ ;? <front>+j
-g > J / _ ;? <front>+j
-j > / c+J _
+g > ĭ / _ ;? <front>+j
+j > / c+ĭ _
 
 ! Loss of intertonic vowels in various environments.
 ! -- Too much? (Anton)
@@ -167,30 +167,30 @@ o > u / _ n? j
 <mid> > <high>$1 / _ <lab> j
 <mid> > <high>$1 / _ <cons> <cons> j
 <lomid> > <mid>$1 / _ <cons>+ j
-;E > j;e
-;O > w;e
+;è > j;e
+;ò > w;e
 
 ! A few more palatisations.
 
-jt > C
-js > S
+jt > ċ
+js > š
 f > h / #|<vowel> _ <glide>? ;? <vowel>
-j > J / # _ ;? <vowel>
+j > ĭ / # _ ;? <vowel>
 
-lj > L
-n+j > N
-dj > JJ
-gj > JJ
+lj > ł
+n+j > ñ
+dj > ĭĭ
+gj > ĭĭ
 
 pj > jp / . _
 rj > jr / . _
-L > Z
+ł > ż
 
 ! Tense resonants.
 
-ll > L / <vowel> _ ;? <vowel>
-nn > N / <vowel> _ ;? <vowel>
-rr > R / <vowel> _ ;? <vowel>
+ll > ł / <vowel> _ ;? <vowel>
+nn > ñ / <vowel> _ ;? <vowel>
+rr > ŕ / <vowel> _ ;? <vowel>
 
 !#############################################################################
 
@@ -200,14 +200,14 @@ rr > R / <vowel> _ ;? <vowel>
 <vstop> > <vfric>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
 <uobs> > <vobs>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
 <uobs> > <vobs>$1 / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
-J > / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
+ĭ > / <vowel>|<liquid> _ ;? <vowel>|<liquid>|<glide>
 <obs> > / _ $1
 
-! Initial Cl > L
+! Initial ċl > ł
 
-pl > L / # _ ;? <vowel>
-kl > L / # _ ;? <vowel>
-fl > L / # _ ;? <vowel>
+pl > ł / # _ ;? <vowel>
+kl > ł / # _ ;? <vowel>
+fl > ł / # _ ;? <vowel>
 
 ! Loss of remaining intertonic vowels.
 ! FIXME: too broad? (Anton)
@@ -234,13 +234,13 @@ e > / <vowel> <alv> _ #
 
 mt|nt > nd
 nk > ng
-L > l / _ <cons>
-N > n / _ <cons>
-R > r / _ <cons>
+ł > l / _ <cons>
+ñ > n / _ <cons>
+ŕ > r / _ <cons>
 
 dn > n
 ct > q
-Dc > q
+ðc > q
 ptm > m
 mm > m
 
@@ -274,8 +274,8 @@ l > w / a _ q
 t|d > q / . _ <cnotl>
 
 b > u / _ d
-B > u / _ <obs>
-B > b
+ů > u / _ <obs>
+ů > b
 
 ! FIXME: just _d?
 
@@ -283,30 +283,29 @@ B > b
 
 ! Devoicing and separation of sibilants.
 
-J > j
+ĭ > j
 jj > j
 
 <vsib> > <usib>$1
 
-c > T
-S|Z > x
+c > þ
+š|ż > x
 
 ! Spellings!
 ! Much altered by Anton Sherwood, 2003 May 20
 
-T > z
+þ > z
 z > c / _ ;? <front>|j
 
 j > y
-L > ll
-R > rr
-N > ñ
+ł > ll
+ŕ > rr
 w > hw / #|<vowel> _ ;? <vowel>
 
 <vfric> > <vstop>$1
 k > qu / _ ;? <front>|y
 k > c
-C > ch
+ċ > ch
 
 x > j
 j > g / _ ;? <front>|y

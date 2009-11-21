@@ -17,17 +17,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# (I don't see the point of copying the full GPL text so if you really care go look it up.)
+# (I don't see the point of copying the full GPL text, so if you really care, go look it up.)
 
-# Based on sc6.pl, with:
-# absolute maximum of 32766, even for + and *
-# word boundary matching
+# Based on sc6.1.pl, with:
+# escaped brackets
+# reversed rule order
+
+# TODO:
+# nodes
+# reversals
+# optional < for >
+# recursion for SC and PSC instead of the current haphazard attempt
+# multicharacter dialect names, like in Zounds
+# gender, etc.
+# better exceptions
+# features from Phonix
+# no "say" feature
+# new version number
+# new documentation
+# updated -help
+# updated favorable comparison to other sound change appliers
 
 ######## SET-UP ########
 
 use charnames ();
 use encoding "UTF-8";
-#use feature "say";
+use feature "say";
 use strict;
 use utf8;
 use warnings;
@@ -309,6 +324,7 @@ my $limit = my $maxLimit = 1000;
 my $mode = 3; # 0 = final; 1 = original and final; 2 = after each non-persistant rule; 3 = after each rule
 my $nfkd = 0;
 my $output;
+my $direction = 1;
 my $rules = "rules.txt";
 my $separator = ",";
 my $notAll = 0;
@@ -325,13 +341,14 @@ foreach (@ARGV) {
   (/^-(?:f|fields)$/i) ? parseFields (1) :
   (/^-(?:f|fields)=(.+)$/i) ? parseFields ($1) :
   (/^-(?:hl|hlevel)=(\d+)$/i) ? $colonThreshold = $1 :
-  (/^-(h|help)$/i) ? record ("SC © 2009 by David Corbett. For more information read readme_sc6.txt.\n\n") :
+  (/^-(h|help)$/i) ? record ("Sound Changer © 2009 by David Corbett. For more information read readme_sc6.txt.\n\n") :
   (/^-html$/i) ? $html = 1 :
   (/^-(?:l|limit)=(\d+)$/i) ? $limit = $maxLimit = $1 :
   (/^-(?:m|mode)=(\d+)$/i) ? $mode = $1 :
   (/^-(n|nfkd)$/i) ? $nfkd = 1 :
   (/^-(?:o|output)$/i) ? $output = "" :
   (/^-(?:o|output)=(.+)$/i) ? $output = $1 :
+  (/^-(?:r|reverse)$/i) ? $direction = -1 :
   (/^-(?:r|rules)=(.+)$/i) ? $rules = $1 :
   (/^-(?:sep|separator)$/i) ? $separator = "\t" :
   (/^-(?:sep|separator)=(.+)$/i) ? $separator = $1 :
@@ -343,7 +360,7 @@ foreach (@ARGV) {
 }
 
 if ($limit == 0) {
-  $limit = $maxLimit = .5;
+  $limit = $maxLimit = .5; # Thus, $limit will never reach 0.
 }
 
 if (defined $output) {
@@ -547,22 +564,24 @@ sub rules {
       @tentAbsPost = parse (3, @post);
       @tentAbsApres = parse (4, @apres);
       
-#foreach (0 .. $#tentAbsAnte) {
-#  my @tan = @{$tentAbsAnte[$_]};
-#  say "tan: ", join ",", @tan;
-#}
-#foreach (0 .. $#tentAbsAvant) {
-#  my @tav = @{$tentAbsAvant[$_]};
-#  say "tav: ", join ",", @tav;
-#}
-#foreach (0 .. $#tentAbsPost) {
-#  my @tpo = @{$tentAbsPost[$_]};
-#  say "tpo: ", join ",", @tpo;
-#}
-#foreach (0 .. $#tentAbsApres) {
-#  my @tap = @{$tentAbsApres[$_]};
-#  say "tap: ", join ",", @tap;
-#}
+=pod
+foreach (0 .. $#tentAbsAnte) {
+  my @tan = @{$tentAbsAnte[$_]};
+  say "tan: ", join ",", @tan;
+}
+foreach (0 .. $#tentAbsAvant) {
+  my @tav = @{$tentAbsAvant[$_]};
+  say "tav: ", join ",", @tav;
+}
+foreach (0 .. $#tentAbsPost) {
+  my @tpo = @{$tentAbsPost[$_]};
+  say "tpo: ", join ",", @tpo;
+}
+foreach (0 .. $#tentAbsApres) {
+  my @tap = @{$tentAbsApres[$_]};
+  say "tap: ", join ",", @tap;
+}
+=cut
       
       next RULE if ($premature);
       $premature = 0;
@@ -601,21 +620,23 @@ sub rules {
   close $rulesRef;
 }
 
-#say "col: ", join ",", @colon;
-#foreach my $name (keys %cats) {
-#  print "$name: ";
-#  foreach (0 .. $#{$cats{$name}}) {
-#    print "@{$cats{$name}}[$_],";
-#  }
-#  say "";
-#}
-#say "p:   [$persist]";
-#say "r:   [$repeat]";
-#say "d:   [$dialect]";
-#say "d:   ", join ",", @dialects;
-#say "dp:  ", join ",", @dialectsPersist;
-#say "w:   ", join ",", @words;
-#say "rul: ", $#absAvant + 1;
+=pod
+say "col: ", join ",", @colon;
+foreach my $name (keys %cats) {
+  print "$name: ";
+  foreach (0 .. $#{$cats{$name}}) {
+    print "@{$cats{$name}}[$_],";
+  }
+  say "";
+}
+say "p:   [$persist]";
+say "r:   [$repeat]";
+say "d:   [$dialect]";
+say "d:   ", join ",", @dialects;
+say "dp:  ", join ",", @dialectsPersist;
+say "w:   ", join ",", @words;
+say "rul: ", $#absAvant + 1;
+=cut
 
 ######## PARSING SUBROUTINES ########
 
@@ -767,7 +788,7 @@ sub parse {
     }
     
     $_ =~ s/(?=(?!\\).)(\{(.*)\}|\*|\+|\?)(\?|)$//;
-    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\|\$)/\\$1/;
+    $_ =~ s/(?=[^\\]|^)(\{|\}|\*|\\|\?|\(|\)|\\|\$|\[|\])/\\$1/;
     $_ =~ s/#/\\b/g; # change # to \b
     
     # THE MAIN PART OF THE REGEX
@@ -1024,7 +1045,8 @@ foreach my $dial (split //, $dialect) {
     my $original = my $wordCopy = $word;
     record ($wordCopy) unless ($mode == 0);
     my @index;
-    SC: for (my $sc = 0; $sc <= $#absAvant; $sc++) {
+    (my $scStart, my $scStop) = $direction == 1 ? (0, $#absAvant) : ($#absAvant, 0);
+    SC: for (my $sc = $scStart; $sc != $scStop + $direction; $sc += $direction) {
       while ($#colonCopy + 1 && $colonCopy[0] == $sc) {
         shift @colonCopy;
         if ($colonCopy[0] <= $colonThreshold) {
@@ -1035,9 +1057,12 @@ foreach my $dial (split //, $dialect) {
         shift @colonCopy;
       }
       
-      my $old = $wordCopy;
       next SC if ($persist =~ /,$sc,/);
       next SC unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial));
+      
+      my $old = $wordCopy;
+      
+      $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction == -1);
       
       @index = regindex ($wordCopy, $sc);
       my $offset = 0;
@@ -1048,26 +1073,7 @@ foreach my $dial (split //, $dialect) {
       $limit--;
       croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
       
-      my $bra = 0;
-      PSC: for (my $psc = 0; $psc <= $#absAvant; $psc++) {
-        my $oldP = $wordCopy;
-        next PSC unless ($persist =~ /,$psc,/);
-        next PSC unless ($dialect eq " " || $dialectsPersist[$psc] eq "" || $dialectsPersist[$psc] =~ escape ($dial));
-        @index = regindex ($wordCopy, $psc);
-        my $offset = 0;
-        while (@index > 0) {
-          ($wordCopy, $offset) = replace ($psc, $wordCopy, $offset, shift @index, shift @index, shift @index);
-        }
-        if (!$bra && ($notAll == 0 || $wordCopy ne $old)) {
-          record (" [") if (length $persist > 1 && $mode >= 3);
-          $bra = 1;
-        }
-        $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
-        $limit--;
-        croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
-        $psc-- if ($repeat =~ /,$psc,/ && $wordCopy ne $oldP);
-      } # PSC
-      record ("]") if (length $persist > 1 && $mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+      $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction ==1);
       
       $wordCopy = edit (" > ", $wordCopy) if ($mode == 2 && ($notAll == 0 || $wordCopy ne $old));
       $sc-- if ($repeat =~ /,$sc,/ && $wordCopy ne $old);
@@ -1079,6 +1085,32 @@ foreach my $dial (split //, $dialect) {
 }
 
 ######## SOUND-CHANGING SUBROUTINES ########
+
+sub psc {
+  (my $scStart, my $scStop, my $dial, my $wordCopy, my $old) = (shift, shift, shift, shift);
+  my $bra = 0;
+  my @index;
+  PSC: for (my $psc = $scStart; $psc != $scStop + $direction; $psc += $direction) {
+    next PSC unless ($persist =~ /,$psc,/);
+    next PSC unless ($dialect eq " " || $dialectsPersist[$psc] eq "" || $dialectsPersist[$psc] =~ escape ($dial));
+    my $oldP = $wordCopy;
+    @index = regindex ($wordCopy, $psc);
+    my $offset = 0;
+    while (@index > 0) {
+      ($wordCopy, $offset) = replace ($psc, $wordCopy, $offset, shift @index, shift @index, shift @index);
+    }
+    if (!$bra && ($notAll == 0 || $wordCopy ne $old)) {
+      record (" [") if (length $persist > 1 && $mode >= 3);
+      $bra = 1;
+    }
+    $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+    $limit--;
+    croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
+    $psc-- if ($repeat =~ /,$psc,/ && $wordCopy ne $oldP);
+  } # PSC
+  record ("]") if (length $persist > 1 && $mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+  return $wordCopy;
+}
 
 # format for @oldIndiv:
 # $oldIndiv[0] -> $oldIndiv[0][0]: f
@@ -1125,7 +1157,15 @@ sub regindex {
       $regex = "($regex)";
       $regex .= "{$min,$max}$greed" if ($complement eq "");
       my $wantMatch = $complement eq "" ? 1 : 0;
+      $allOlds =~ s/(\{|\}|\*|\\|\?|\(|\)|\\|\$|\[|\])/\\$1/; # added
       my $doesMatch = $word =~ /(?:^.{$i}$allOlds)($regex)/ ? 1 : 0;
+      
+      # MATCH  WANT?  RESULT
+      #   Y      Y    saves what was matched in various places
+      #   -      Y    tries at the next character
+      #   Y      -    increments the position counter by the length of what was matched
+      #   -      -    saves blanks in various places
+      
       if ($doesMatch && $wantMatch) {
         $greatestIndex = length $& if ($greatestIndex < length $&);
         my $matched = "";
@@ -1167,12 +1207,6 @@ sub regindex {
   }
   return @ret;
 }
-
-# MATCH  WANT?  RESULT
-#   Y      Y    saves what was matched in various places
-#   -      Y    tries at the next character
-#   Y      -    increments the position counter by the length of what was matched
-#   -      -    saves blanks in various places
 
 sub blacken {
   my @white = split /\|/, shift;
@@ -1346,15 +1380,15 @@ sub edit {
   my $text = shift;
   record ($text);
   if ($edit > 0) {
-    record (" >>");
+    print " >>";
     my $input = <STDIN>;
     if (defined $input) {
       chomp $input;
-      print $output $input if (defined $output);
+      print $output " >> $input" if (defined $output);
     } else {
       $edit = -1;
       print $output $text if (defined $output);
-      return ($text);
+      return $text;
     }
     $input eq "" ? return $text : return $input;
   }
