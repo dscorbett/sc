@@ -19,9 +19,8 @@
 
 # (I don't see the point of copying the full GPL text, so if you really care, go look it up.)
 
-# Based on sc6.1.pl, with:
-# escaped brackets
-# reversed rule order
+# Based on sc6.2.pl, with:
+# nothing new yet
 
 # TODO:
 # nodes
@@ -37,6 +36,8 @@
 # new documentation
 # updated -help
 # updated favorable comparison to other sound change appliers
+# new name for &croak
+# Y/N/Q for &promptOverwrite
 
 ######## SET-UP ########
 
@@ -637,6 +638,33 @@ say "dp:  ", join ",", @dialectsPersist;
 say "w:   ", join ",", @words;
 say "rul: ", $#absAvant + 1;
 =cut
+      
+#=pod
+foreach (0 .. $#absAnte) {
+  my @aan = @{$absAnte[$_]};
+  foreach (0 .. $#aan) {
+    say "aan: ", join ",", @$_;
+  }
+}
+foreach (0 .. $#absAvant) {
+  my @aav = @{$absAvant[$_]};
+  foreach (@aav) {
+    say "aav: ", join ",", @$_;
+  }
+}
+foreach (0 .. $#absPost) {
+  my @apo = @{$absPost[$_]};
+  foreach (@apo) {
+    say "apo: ", join ",", @$_;
+  }
+}
+foreach (0 .. $#absApres) {
+  my @aap = @{$absApres[$_]};
+  foreach (@aap) {
+    say "aap: ", join ",", @$_;
+  }
+}
+#=cut
 
 ######## PARSING SUBROUTINES ########
 
@@ -1032,63 +1060,157 @@ sub parse {
 
 ######## WORDS ########
 
+my $in = "";
+my $currentNode;
 $dialect = " " if ($dialect eq "");
 foreach my $dial (split //, $dialect) {
   next unless ($reqDial eq "" || $reqDial =~ $dial);
   record ("$dial:\n") if (length $dialect > 1);
-  my @colonCopy = @colon;
+  my @trees;
   foreach my $word (@words) {
     chomp if (defined $_); # The condition is to suppress an annoying EOF error.
-    #$word = encode ("utf8", $word);
     $limit = $maxLimit;
     $edit = 1 if ($edit == -1);
-    my $original = my $wordCopy = $word;
-    record ($wordCopy) unless ($mode == 0);
+    my $wordCopy = $word;
     my @index;
-    (my $scStart, my $scStop) = $direction == 1 ? (0, $#absAvant) : ($#absAvant, 0);
-    SC: for (my $sc = $scStart; $sc != $scStop + $direction; $sc += $direction) {
-      while ($#colonCopy + 1 && $colonCopy[0] == $sc) {
-        shift @colonCopy;
-        if ($colonCopy[0] <= $colonThreshold) {
-          record ("\n" . $colonCopy[1]) if ($mode >= 2);
-          record ("\n") unless (defined $colonCopy[3] && $colonCopy[2] == $sc && $colonCopy[3] <= $colonThreshold);
-        }
-        shift @colonCopy;
-        shift @colonCopy;
+    my %root = (
+      "word" => $word,
+      "level" => 0,
+    );
+    $currentNode = \%root;
+    BRANCH: while (1) {
+      my $sc = ruleNum ($$currentNode{"level"});
+      if ($sc == -1) {
+        $currentNode = kin ($currentNode);
       }
-      
-      next SC if ($persist =~ /,$sc,/);
-      next SC unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial));
+      last BRANCH if ($currentNode == -1);
+      unless ($dialect eq " " || $dialects[$sc] eq "" || $dialects[$sc] =~ escape ($dial)) {
+        ($$currentNode{"level"})++;
+        next;
+      }
       
       my $old = $wordCopy;
       
-      $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction == -1);
+ #     $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction == -1);
       
       @index = regindex ($wordCopy, $sc);
       my $offset = 0;
-      while (@index > 0) {
+      while (@index) {
         ($wordCopy, $offset) = replace ($sc, $wordCopy, $offset, shift @index, shift @index, shift @index);
       }
-      $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+      my $edit = $wordCopy;
+      $edit = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+      
+      my @tmp0 = ({
+        "parent" => $currentNode,
+        "word" => $wordCopy,
+        "edit" => $edit,
+        "level" => 1 + $$currentNode{"level"},
+      }, {                                          # not for release ;)
+        "parent" => $currentNode,
+        "word" => "thu$wordCopy",
+        "edit" => "thu$edit",
+        "level" => 1 + $$currentNode{"level"},
+      });
+      my @tmp = ({
+        "parent" => $currentNode,
+        "word" => $wordCopy,
+        "edit" => $edit,
+        "level" => 1 + $$currentNode{"level"},
+      });
+      $$currentNode{"level"} == 0 ? $$currentNode{"nodes"} = [@tmp0] : $$currentNode{"nodes"} = [@tmp0];
+      $currentNode = \%{$$currentNode{"nodes"}[0]}; # will [0] have to be changed for going backwards?
+      
       $limit--;
       croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
       
-      $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction ==1);
-      
-      $wordCopy = edit (" > ", $wordCopy) if ($mode == 2 && ($notAll == 0 || $wordCopy ne $old));
-      $sc-- if ($repeat =~ /,$sc,/ && $wordCopy ne $old);
-    } # SC
-    $wordCopy = edit (" > ", $wordCopy) if ($mode == 1 && ($notAll == 0 || $wordCopy ne $original));
-    record ($wordCopy) if ($mode == 0);
-    record ("\n");
+ #     $wordCopy = psc ($scStart, $scStop, $dial, $wordCopy, $old) if ($direction == 1);
+    } # BRANCH
+    push @trees, \%root;
+  }
+  say "\n+++++++++++++++++++++++++++++++++++++++++++++";
+  foreach (@trees) {
+    show ($_);
+    say "+++++++++++++++++++++++++++++++++++++++++++++";
+  }
+}
+
+sub kin {
+  my $node = shift;
+  
+  # Mark the node.
+  $$node{"x"} = 0;
+#show ($node);say "0" x 55;
+  
+  if (exists $$node{"parent"}) {
+    # If the node is not the root, find its parent.
+    $node = \%{$$node{"parent"}};
+  } else {
+    # If it is the root, return failure.
+    return -1;
+  }
+  
+  # Find the next unmarked sibling.
+  my $nodeNum = 0;
+  NODE: foreach (@{$$node{"nodes"}}) {
+    foreach ($_) {
+      last NODE unless (exists $$_{"x"});
+      $nodeNum++;
+    }
+  }
+  
+  if ($nodeNum > $#{$$node{"nodes"}}) {
+    # If there are no unmarked siblings, find the parent's kin.
+#show ($node);say "^" x 55;
+    return kin ($node);
+  } else {
+    $node = \%{$$node{"nodes"}[$nodeNum]};
+    if (ruleNum ($$node{"level"}) == -1) {
+      # If the sibling fails the level test, find its kin.
+#show ($node);say ">" x 55;
+      return kin ($node);
+    } else {
+      # If it passes, return it.
+#show ($node);say "!" x 55;
+      return $node;
+    }
+  }
+}
+
+sub ruleNum {
+  my $ruleNum = shift;
+  my $npsc = -1;
+  for (my $sc = 0; $sc <= $#absAvant; $sc++) {
+    $npsc++ unless ($persist =~ /,$sc,/);
+    return $sc if ($npsc == $ruleNum);
+  }
+  return -1;
+}
+
+######## DEBUGGING DISPLAY SUBROUTINE ########
+
+sub show {
+  my $node = shift;
+  say "$in===$node===";
+  while (my ($k, $v) = each %$node) {
+    if (ref $v eq "ARRAY") {
+      print "$in$k =>\n";
+      $in .= "  ";
+      foreach (@$v) {
+        show ($_);
+      }
+      $in =~ s/  $//;
+    } else {
+      print "$in$k => $v\n";
+    }
   }
 }
 
 ######## SOUND-CHANGING SUBROUTINES ########
 
-sub psc {
-  (my $scStart, my $scStop, my $dial, my $wordCopy, my $old) = (shift, shift, shift, shift);
-  my $bra = 0;
+sub psc { # TODO: update me!
+#record (" [");
+  (my $scStart, my $scStop, my $dial, my $wordCopy, my $old) = (shift, shift, shift, shift, shift);
   my @index;
   PSC: for (my $psc = $scStart; $psc != $scStop + $direction; $psc += $direction) {
     next PSC unless ($persist =~ /,$psc,/);
@@ -1096,19 +1218,23 @@ sub psc {
     my $oldP = $wordCopy;
     @index = regindex ($wordCopy, $psc);
     my $offset = 0;
-    while (@index > 0) {
+    while (@index) {
       ($wordCopy, $offset) = replace ($psc, $wordCopy, $offset, shift @index, shift @index, shift @index);
     }
-    if (!$bra && ($notAll == 0 || $wordCopy ne $old)) {
-      record (" [") if (length $persist > 1 && $mode >= 3);
-      $bra = 1;
-    }
+    $$currentNode{"p"} = 1;
+    $$currentNode{"word"} = $wordCopy;
     $wordCopy = edit (" > ", $wordCopy) if ($mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
-    $limit--;
+    $$currentNode{"edit"} = $wordCopy;
+    my @tmp = $$currentNode{"nodes"};
+    @tmp = ({});
+    $$currentNode{"nodes"} = [@tmp];
+    my $parentNode = $currentNode;
+    $currentNode = (($$currentNode{"nodes"})[0][0]);
+    $$currentNode{"parent"} = $parentNode;
     croak ("\n\n\nError: Infinite repetition\n\n\n") if ($limit == 0);
     $psc-- if ($repeat =~ /,$psc,/ && $wordCopy ne $oldP);
-  } # PSC
-  record ("]") if (length $persist > 1 && $mode >= 3 && ($notAll == 0 || $wordCopy ne $old));
+  }
+#record ("]");
   return $wordCopy;
 }
 
@@ -1376,9 +1502,9 @@ sub record {
 }
 
 sub edit {
-  record (shift);
+shift;#  record (shift);
   my $text = shift;
-  record ($text);
+#  record ($text);
   if ($edit > 0) {
     print " >>";
     my $input = <STDIN>;
@@ -1450,8 +1576,7 @@ sub disp {
 }
 
 sub codepoint {
-  my $char = $_[0];
-  return sprintf ("%.4X", unpack ("U0U*", $char));
+  return sprintf ("%.4X", unpack ("U0U*", shift));
 }
 
 sub escape {
